@@ -63,3 +63,16 @@ FetchContent_MakeAvailable(doctest)
 add_library(doctest_headers INTERFACE)
 target_include_directories(doctest_headers INTERFACE ${doctest_SOURCE_DIR})
 add_library(doctest::doctest ALIAS doctest_headers)
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+enable_testing()
+
+foreach(suite build_tests)
+  add_executable(${suite} tests/${suite}.cpp)
+  target_link_libraries(${suite} PRIVATE doctest::doctest)
+  target_compile_options(${suite} PRIVATE ${DARIYARAAH_WARNINGS})
+  add_test(NAME ${suite} COMMAND ${suite})
+endforeach()
