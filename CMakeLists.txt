@@ -131,7 +131,10 @@ target_compile_options(dariyaraah_http PRIVATE ${DARIYARAAH_WARNINGS})
 
 # The server layer, separate from the HTTP layer because the threading models of
 # M3 and M4 replace this and leave the parsing untouched.
-add_library(dariyaraah_server src/server/handler.cpp src/server/connection.cpp)
+add_library(dariyaraah_server
+  src/server/handler.cpp
+  src/server/connection.cpp
+  src/server/server.cpp)
 target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::core)
 target_compile_options(dariyaraah_server PRIVATE ${DARIYARAAH_WARNINGS})
 
