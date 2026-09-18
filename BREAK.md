@@ -248,4 +248,18 @@ sleep here, and what it becomes is the interesting part.
 
 Numbers this unit establishes that later units quote rather than re-derive.
 
-*(Filled in as they are measured.)*
+| Number | Value | From |
+|---|---|---|
+| `sleep_for(20ms)` on this machine | **23.4 ms** — a 17% overshoot. Any "inject N ms" is really N + 3.4 | E1 |
+| dariyaraah's own ceiling | **~74,500 rps**, reached at 2,000 connections, flat to 3,000 | E1 |
+| Thread-per-connection is fine until | **at least 3,000 connections** with a sleeping handler. The apparent collapse at 4,000 is the rig's | E1 |
+| The rig's ceiling past 1,000 conns | 107k @1000 · 103k @2000 · 97k @3000 · **57.8k @4000**. E2's table stops at 1,000; this extends it | E1 |
+| Run-to-run p99 noise at 500 conns | 29–63 ms, i.e. **up to 2×**. One sweep cannot resolve a tail effect smaller than that | E1 |
+| Open-loop `rig_lag` at low rates | **7.4 ms at 400 rps**, 2.7 ms at 800, ~0 past the knee. Subtract it before comparing modes | E2 |
+| p99/p50 under sustained overload | converges on **2**, both percentiles rising together | E2 |
+
+**The standing question, answered:** p99 does **not** detach from p50 — not in closed-loop (1.04 →
+1.48 across 1 → 3,000 connections) and not in open-loop, where the ratio converges on 2 with *both*
+percentiles leaving 20 ms together. Unit 0's E2 was right and the track brief describes a transient:
+a queue that forms and drains, which is unit 0's E3 stall, not a ramp. Queueing delays every request
+equally, and that holds in both load modes rather than only the self-limiting one.

@@ -31,7 +31,17 @@ There is a genuine disagreement to settle. The track brief predicts that "p50 st
 goes to hundreds of ms". Unit 0's E2 measured the opposite about a thread-per-connection program —
 past saturation p50 and p99 rise *together*, because queueing delays every request equally — and
 named this repo while saying so. [DESIGN.md decision 3](DESIGN.md) gives the hypothesis that
-reconciles them, and BREAK.md's E1 and E2 test it.
+reconciles them, and BREAK.md's E1 and E2 tested it.
+
+**Answered: p99 does not detach from p50.** Closed-loop, the ratio climbs from 1.04 to 1.48 across
+1 → 3,000 connections. Open-loop under sustained overload it converges on 2 — with *both* percentiles
+leaving 20ms together, p50 at 822ms and p99 at 1,627ms. Unit 0's E2 was right. The brief is describing
+a **transient**: a queue that forms and drains, which is unit 0's E3 stall rather than a ramp.
+
+And a methodological finding that nearly went the other way: the first sweep reported p99 = 63.18ms at
+500 connections, a ratio of 2.47, which reads exactly like the detachment. Five repeats gave 28.97,
+30.15, 28.97, 29.23, 29.36. **The effect being looked for was the same size as the run-to-run noise**,
+so a single sweep could not have answered the question in either direction.
 
 ---
 
@@ -65,13 +75,13 @@ see DESIGN.md.
 
 ## Status
 
-**M1 complete. It serves, and nothing has been measured yet — deliberately.**
+**M2 complete. It serves, it has been measured, and the standing question is settled.**
 
 | Milestone | What lands | Status |
 |---|---|---|
 | M0 — Skeleton | CMake, doctest, sanitizers, the rig vendored, `check.sh` | ✅ |
 | M1 — The naive server | accept loop, thread per connection, minimal HTTP/1.1, `GET /` → 20ms → 200 | ✅ |
-| M2 — The ramp | predictions committed first, then E1 and E2 | |
+| M2 — The ramp | predictions committed first, then E1 and E2 | ✅ |
 | M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | |
 | M4 — Event loop | one thread, non-blocking sockets, `kqueue`, E4 | |
 | M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | |
@@ -133,6 +143,20 @@ enough to read one at a time.
 **Nothing has been benchmarked.** Track rule 4 says the prediction is written before the run, so
 running the ramp before BREAK.md has predictions in it would spend the experiment to satisfy
 curiosity. The only number produced so far is the end-to-end test's ceiling, which is arithmetic.
+
+### M2 — The ramp ✅
+- [x] predictions committed **before** the sweep script existed
+- [x] `scripts/e1-ramp.sh` — closed-loop, 1 → 3,000 connections, one server per sweep
+- [x] `scripts/e2-rate.sh` — open-loop, connections fixed, rate swept through the knee
+- [x] **throughput linear to 2,000 connections**, then flat at ~74,500 rps; Little's law within 3%
+- [x] **`sleep_for(20ms)` measured at 23.4ms** — 23.4 of the 24.8ms a request takes is the timer, and
+      ~1.4ms is syscalls, parsing, the thread wake and loopback TCP put together
+- [x] the apparent collapse at 4,000 connections **traced to the rig**, which does 57,784 rps there
+      against a target that does nothing
+- [x] five repeats at 500 connections, because the first sweep's p99 was a 1-in-7 outlier that would
+      have become the finding
+- [x] open-loop's `rig_lag` at low rates identified as the instrument's, not the server's — the
+      reason unit 0's M6 was worth reopening a closed repo for
 
 ---
 
