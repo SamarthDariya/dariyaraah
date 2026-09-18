@@ -34,3 +34,32 @@ option(DARIYARAAH_WERROR "Treat warnings as errors" ON)
 if(DARIYARAAH_WERROR)
   list(APPEND DARIYARAAH_WARNINGS -Werror)
 endif()
+
+# ---------------------------------------------------------------------------
+# doctest
+# ---------------------------------------------------------------------------
+#
+# Fetched as source and used as a header, rather than built as its own CMake
+# project. SOURCE_SUBDIR names a directory that contains no CMakeLists.txt,
+# which is what tells FetchContent_MakeAvailable to download and stop short of
+# add_subdirectory().
+#
+# Not merely tidier — necessary. doctest v2.4.11 declares
+# cmake_minimum_required(VERSION 3.0), CMake 4 dropped compatibility below 3.5,
+# and configuring doctest's project fails outright. The same trap caught
+# dariyakyu and dariyanaap; the wrong fix both times was forcing
+# CMAKE_POLICY_VERSION_MINIMUM, which papers over it for every dependency at
+# once.
+include(FetchContent)
+
+FetchContent_Declare(
+  doctest
+  GIT_REPOSITORY https://github.com/doctest/doctest.git
+  GIT_TAG        v2.4.11
+  SOURCE_SUBDIR  header-only-no-cmake-project
+)
+FetchContent_MakeAvailable(doctest)
+
+add_library(doctest_headers INTERFACE)
+target_include_directories(doctest_headers INTERFACE ${doctest_SOURCE_DIR})
+add_library(doctest::doctest ALIAS doctest_headers)
