@@ -78,7 +78,39 @@ about different experiments, and neither alone would have shown it.
 
 ## Part II — Structure
 
-Written at M1, once there is something to describe.
+Four layers, and the seams between them are chosen so that M3 and M4 replace exactly one.
+
+```
+apps/dariyaraah.cpp     flags, bind, run
+  └── Server            accept loop  ──►  thread per connection   ← M3 and M4 replace THIS
+        └── serve_connection          read, frame, parse, hand over, write
+              ├── http::  find_header_end · parse_request_line · write_response
+              └── handle(Request) -> Response        the 20ms, and no socket in sight
+```
+
+**`handle` is the fixed point.** It takes a `Request` and returns a `Response` and cannot reach a
+socket, which is what lets three threading models run *the same work*. A handler reachable only
+through a connection object would have to be reimplemented per model, and E1–E4 would then be
+comparing three different programs while calling the difference a threading result.
+
+**Everything borrows.** `Request`'s fields are `string_view`s into the connection's read buffer;
+`Response`'s body is a `string_view`; `write_response` serialises into a caller-owned `string`. Three
+places where an allocation per request would otherwise land on the measured path and be reported as
+this service's latency. The buffers are owned by `serve_connection` and reused for the life of the
+connection — the same rule as dariyanaap's `perform_request`.
+
+**Two bounds guard a connection, and they guard different things.** `kIdleTimeout` (30s, set on
+accept) bounds a client that connects and says nothing; `kMaxHeaderBytes` (16 KiB) bounds one that
+says too much. Neither is a policy about clients — at M1 a thread *is* the unit of capacity, so an
+unbounded connection is a denial of service costing the attacker one socket.
+
+**Framing is checked before reading, not after.** Keep-alive plus one TCP segment carrying two
+requests is ordinary, so a server that always read first would block waiting for a request it was
+already holding — visible only under load, and looking like the target's fault.
+
+What unit 0 supplies, and this repo therefore never writes: `Listener`, `Socket`, `Endpoint`,
+`Flags`, `MonotonicClock`, and the error hierarchy. Unit 1 writes HTTP, a handler, and a threading
+model, which is the whole of what it is about.
 
 ---
 

@@ -65,16 +65,33 @@ see DESIGN.md.
 
 ## Status
 
-**M0 complete. Nothing serves traffic yet.**
+**M1 complete. It serves, and nothing has been measured yet — deliberately.**
 
 | Milestone | What lands | Status |
 |---|---|---|
 | M0 — Skeleton | CMake, doctest, sanitizers, the rig vendored, `check.sh` | ✅ |
-| M1 — The naive server | accept loop, thread per connection, minimal HTTP/1.1, `GET /` → 20ms → 200 | |
+| M1 — The naive server | accept loop, thread per connection, minimal HTTP/1.1, `GET /` → 20ms → 200 | ✅ |
 | M2 — The ramp | predictions committed first, then E1 and E2 | |
 | M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | |
 | M4 — Event loop | one thread, non-blocking sockets, `kqueue`, E4 | |
 | M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | |
+
+---
+
+## Running it
+
+```sh
+./build/dariyaraah --port 0          # kernel-chosen port, printed on line one
+curl -D- http://127.0.0.1:<port>/    # 200 OK, 20ms later
+```
+
+```
+listening 127.0.0.1:57468  GET / -> 200 after 20ms, thread per connection
+```
+
+`--port 0` matters more than it looks: the first line is flushed in the same shape
+`dariyanaap-null` prints, so M2's sweep script reads the port back out of it and two runs on one
+machine cannot collide.
 
 ---
 
@@ -97,6 +114,25 @@ enough to read one at a time.
 - [x] the vendoring claim **checked rather than trusted**: only `build_tests` is produced
 - [x] first suite tests the assumptions, not the code — C++20 really on, `steady_clock` really steady
 - [x] `scripts/check.sh` — build, test, sanitizers, and the `system_clock` ban in one command
+
+### M1 — The naive server ✅
+- [x] `find_header_end` — framing, with the byte-at-a-time and pipelined cases tested
+- [x] `parse_request_line` — rejects rather than guesses; no opinion about methods or versions
+- [x] `write_response` — `Content-Length` only, and **no `Date` header**: the 20ms is meant to be the
+      only thing on the path
+- [x] responses checked against `dariyanaap::Http11Get`, the parser that will actually read them
+- [x] `handle()` is a free function `Request -> Response` that cannot see a socket — the seam that
+      makes M1, M3 and M4 comparable rather than three different programs
+- [x] the 20ms sleep is **after routing**, and tested to be: a run pointed at the wrong path returns
+      in microseconds instead of looking like a fast server
+- [x] `serve_connection` never throws — an exception out of a thread's entry point is `std::terminate`
+- [x] one `Server`, one binary; M3 and M4 add a flag rather than an executable
+- [x] end-to-end: the rig against a real server, with the Little's law ceiling asserted
+- [x] green under plain, ASan/UBSan and TSan
+
+**Nothing has been benchmarked.** Track rule 4 says the prediction is written before the run, so
+running the ramp before BREAK.md has predictions in it would spend the experiment to satisfy
+curiosity. The only number produced so far is the end-to-end test's ceiling, which is arithmetic.
 
 ---
 
