@@ -1,5 +1,6 @@
 #include "server/server.hpp"
 
+#include <cassert>
 #include <optional>
 #include <string>
 #include <thread>
@@ -90,6 +91,15 @@ namespace {
 // M1 and M3 keep this on a thread's stack; here it has to be somewhere the
 // single thread can put it down and pick up again.
 struct Parked {
+    // A constructor rather than aggregate initialisation, and not for style.
+    // Parked{socket, {}, {}, {}} compiles, and the trailing {} overrides
+    // scratch's size with zero — after which read_some returns zero bytes,
+    // which this loop reads as a clean hang-up, and the server closes every
+    // connection the moment it arrives while reporting nothing wrong. That was
+    // a real bug for the length of one commit. A constructor makes the shape
+    // that caused it impossible to write.
+    explicit Parked(dariyanaap::Socket socket) : client(std::move(socket)) {}
+
     dariyanaap::Socket client;
     string received;
     string out;
@@ -104,6 +114,11 @@ struct Parked {
 // server, and the point is to measure how bad that is rather than to assume it.
 bool serve_one_turn(Parked& parked) {
     try {
+        // Asserted rather than assumed: a zero-length buffer makes read_some
+        // return zero, which is indistinguishable here from a client hanging
+        // up, and the server then closes every connection the instant it
+        // arrives while reporting nothing wrong.
+        assert(!parked.scratch.empty() && "read buffer must have room in it");
         const size_t got = parked.client.read_some(
             {parked.scratch.data(), parked.scratch.size()});
         if (got == 0) {
@@ -146,7 +161,7 @@ void Server::run_event_loop() {
                 client.set_timeouts(kIdleTimeout, kIdleTimeout);
                 const int client_fd = client.fd();
                 loop.watch_read(client_fd);
-                parked.emplace(client_fd, Parked{std::move(client), {}, {}, {}});
+                parked.emplace(client_fd, std::move(client));
                 continue;
             }
 
