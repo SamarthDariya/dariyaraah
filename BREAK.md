@@ -297,10 +297,40 @@ rate — earning its keep three repos later.
   by kind, never as one rate", earning its keep three repos later for a reason nobody had in mind
   when it was written.
 
-## E4 — Event loop (M4)
+## E4a — Event loop, handler still blocking (M4)
 
-The same two ramps again, one thread, non-blocking sockets, `kqueue`. The 20ms sleep cannot stay a
-sleep here, and what it becomes is the interesting part.
+One thread, `kqueue`, and `handle()` unchanged — so the single thread sleeps for 20ms in the middle
+of everything. Built naive first, per track rule 1, because "never block the event loop" is advice
+everyone repeats and almost nobody has measured.
+
+**Samarth's prediction:** *not recorded,* as before.
+
+**Claude's prediction:**
+
+| conns | req/s | p50 | p99 |
+|---|---|---|---|
+| 1 | ~42 | 24.8 ms | 25.7 ms |
+| 32 | **~42** | ~750 ms | ~780 ms |
+| 500 | **~42** | ~11,700 ms | timeouts |
+
+Throughput is `1 / service_time` at every step — one thread, one request at a time, and connections
+buy nothing. **This should be the worst model in the unit by three orders of magnitude at the top of
+the ramp**: 42 rps against M1's 19,525 and M3's 1,365.
+
+Latency is where it gets ugly. Little's law runs in reverse: with N connections all waiting on one
+server, p50 ≈ N × 23.4 ms. At 32 connections that is 750 ms; at 500 it exceeds the rig's 1,000 ms read
+timeout, so most requests should fail rather than return, and throughput should *fall* as the run
+spends itself on connections that time out and reconnect.
+
+- **Measured:**
+- **Wrong about:**
+
+## E4b — Event loop, the database call as a timer (M4)
+
+The fix, and the one change that makes an event loop an event loop: the 20ms stops being a sleep and
+becomes a `kqueue` timer, with the connection parked until it fires. `handle()` splits into `route()`
+plus a declared delay, so all four models still do identical work and only *who waits* differs —
+which is what a threading model is.
 
 **Samarth's prediction:**
 
