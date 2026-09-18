@@ -220,12 +220,38 @@ than the prediction would have been.
 
 ## E3 — Bounded pool and queue (M3)
 
-The same two ramps against a fixed pool with a request queue in front. The first design in this
-series with genuinely shared mutable state.
+The same closed-loop ramp against a pool of **32 workers held fixed**, connections 1 → 500. Open-loop
+adds nothing while connections are under the worker count — it is E2 with extra steps — so the
+interesting sweep is the one where connections exceed workers.
 
-**Samarth's prediction:**
+**Samarth's prediction:** *not recorded,* as before.
 
-**Claude's prediction:**
+**Claude's prediction**, committed before `e3-pool.sh` existed:
+
+| conns | req/s | p50 | p99 | errors |
+|---|---|---|---|---|
+| 1 | 41 | 24.8 ms | 25.7 ms | 0 |
+| 16 | 655 | 24.9 | 25.8 | 0 |
+| 32 | 1,310 | 24.9 | 26.2 | 0 |
+| 64 | **1,310** | ~25 | ~26 | timeouts |
+| 128 | **1,310** | ~25 | ~26 | timeouts + connects refused |
+| 500 | **1,310** | ~25 | ~26 | many |
+
+**The flatline finally appears, at `workers / 0.0244s` ≈ 1,310 rps**, and no number of extra
+connections moves it. That is the brief's sentence, arriving one milestone later than the brief puts
+it, and for the reason the brief gives: threads have stopped tracking connections.
+
+The claim worth being wrong about is the latency column. **I expect p50 and p99 to stay flat at
+~25/26 ms all the way to 500 connections — better than M1's 25.7/29.1 ms at the same step — while the
+service gets dramatically worse.** A worker holds a keep-alive connection for its whole life, so past
+32 connections the *served* ones are served exactly as fast as before, and the starved ones produce
+timeouts and refused connects rather than slow requests. They never reach the histogram at all.
+
+If that is right, E3's lesson is not about pools. It is that **latency percentiles cannot see
+starvation**: the tail improves while most clients get nothing, and every number in the latency table
+is a true statement about a shrinking subset of the traffic. The error counters are the only place
+the failure appears, which is unit 0's decision 6 — errors counted by kind, never folded into one
+rate — earning its keep three repos later.
 
 - **Measured:**
 - **Wrong about:**
