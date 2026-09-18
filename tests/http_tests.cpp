@@ -42,3 +42,34 @@ TEST_CASE("a second request in the buffer does not extend the first") {
     REQUIRE(end.has_value());
     CHECK(*end == kRigRequest.size());
 }
+
+// ---------------------------------------------------------------------------
+// parse_request_line
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the request line the rig sends parses into three fields") {
+    const optional<Request> request = parse_request_line(kRigRequest);
+    REQUIRE(request.has_value());
+    CHECK(request->method == "GET");
+    CHECK(request->target == "/");
+    CHECK(request->version == "HTTP/1.1");
+}
+
+TEST_CASE("a request line is rejected rather than guessed at") {
+    // Each of these could be "read generously" into something servable, and
+    // that is the objection to doing so: a request nobody sent, answered 200.
+    CHECK_FALSE(parse_request_line("GET /\r\n").has_value());              // no version
+    CHECK_FALSE(parse_request_line("GET /a b HTTP/1.1\r\n").has_value());  // three spaces
+    CHECK_FALSE(parse_request_line("GET  HTTP/1.1\r\n").has_value());      // empty target
+    CHECK_FALSE(parse_request_line(" / HTTP/1.1\r\n").has_value());        // empty method
+    CHECK_FALSE(parse_request_line("GET / ").has_value());                 // no line yet
+}
+
+TEST_CASE("the parser has no opinion about methods or versions") {
+    // Structure only. A handler decides what it serves; a parser that knew the
+    // list would have to be edited to add one.
+    const optional<Request> request = parse_request_line("BREW /pot HTTP/9.9\r\n\r\n");
+    REQUIRE(request.has_value());
+    CHECK(request->method == "BREW");
+    CHECK(request->version == "HTTP/9.9");
+}
