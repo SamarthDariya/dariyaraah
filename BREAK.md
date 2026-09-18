@@ -428,6 +428,24 @@ Numbers this unit establishes that later units quote rather than re-derive.
 | p99/p50 under sustained overload | converges on **2**, both percentiles rising together | E2 |
 | A bounded pool's ceiling | **`workers / service_time`** exactly — 32 workers, 23.4 ms, 1,365 rps | E3 |
 | What a latency table hides | **starvation, entirely.** A refused connection has no duration, so p99 *improves* as refusals rise. Only per-kind error counts show it | E3 |
+| What a throughput table hides | **timeouts, which it counts as work.** Reported 61 rps where 38 were real. The mirror image of the row above | E4a |
+| An event loop with a blocking call | `1 / service_time`, whatever the concurrency. **21× worse** than either threaded model | E4a |
+| An event loop with the wait as an event | **98.4% of thread-per-connection's throughput on one thread** — 19,207 vs 19,525 rps, p50 within 0.13 ms | E4b |
+
+**The four models, at 500 connections, same handler, same machine:**
+
+| model | threads | req/s | p50 | p99 | errors |
+|---|---|---|---|---|---|
+| thread per connection | 500 | 19,525 | 25.69 ms | 29.10 | 0 |
+| **event loop + timer** | **1** | **19,207** | 25.82 | 30.54 | 0 |
+| pool of 32 | 32 | 1,441 | 24.90 | 161.48 | **968 refused** |
+| event loop, blocking | 1 | 61* | 220.20 | 1,002.44 | **69 timeout** |
+
+\* at 32 connections; it cannot reach 500 inside the rig's read timeout. Of that 61, ~23 is timeouts
+counted as throughput.
+
+**The unit in one line:** the work was identical in all four. Every difference in that table is
+*who waits*.
 
 **The standing question, answered:** p99 does **not** detach from p50 — not in closed-loop (1.04 →
 1.48 across 1 → 3,000 connections) and not in open-loop, where the ratio converges on 2 with *both*

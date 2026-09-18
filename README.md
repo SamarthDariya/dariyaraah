@@ -75,7 +75,7 @@ see DESIGN.md.
 
 ## Status
 
-**M3 complete. Two threading models measured; the pool's flatline found, and what it hides.**
+**M4 complete. Four models measured. One thread matches five hundred.**
 
 | Milestone | What lands | Status |
 |---|---|---|
@@ -83,7 +83,7 @@ see DESIGN.md.
 | M1 — The naive server | accept loop, thread per connection, minimal HTTP/1.1, `GET /` → 20ms → 200 | ✅ |
 | M2 — The ramp | predictions committed first, then E1 and E2 | ✅ |
 | M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | ✅ |
-| M4 — Event loop | one thread, non-blocking sockets, `kqueue`, E4 | |
+| M4 — Event loop | one thread, `kqueue`, E4a blocking and E4b with the wait as a timer | ✅ |
 | M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | |
 
 ---
@@ -168,6 +168,32 @@ curiosity. The only number produced so far is the end-to-end test's ceiling, whi
 - [x] **p99 improves as the service collapses** — 1,002 ms → 161 ms while refused connections go
       95 → 448 → 968
 - [x] green under plain, ASan/UBSan and TSan with pool, queue, accept loop and rig all live
+
+### M4 — Event loop ✅
+- [x] `EventLoop` — a thin kqueue, level-triggered, with timers
+- [x] **E4a: the blocking loop**, built naive first — 42 rps flat, 21× worse than either threaded
+      model, because one thread that sleeps is a server doing one thing at a time
+- [x] `handle()` split into `route()` + `needs_database()`, so all four models do **identical work**
+      and differ only in who waits
+- [x] **E4b: the wait becomes a kqueue timer** — 19,207 rps on one thread against
+      thread-per-connection's 19,525 on five hundred, p50 within 0.13 ms, zero errors
+- [x] the empty-buffer bug that closed every connection while four suites stayed green, and the test
+      that would have caught it
+- [x] green under plain, ASan/UBSan and TSan
+
+### The four models, 500 connections, same handler, same machine
+
+| model | threads | req/s | p50 | p99 | errors |
+|---|---|---|---|---|---|
+| thread per connection | 500 | 19,525 | 25.69 ms | 29.10 | 0 |
+| **event loop + timer** | **1** | **19,207** | 25.82 | 30.54 | 0 |
+| pool of 32 | 32 | 1,441 | 24.90 | 161.48 | **968 refused** |
+| event loop, blocking | 1 | 61* | 220.20 | 1,002.44 | **69 timeout** |
+
+\* at 32 connections — it cannot reach 500 inside the rig's read timeout, and ~23 of that 61 is
+timeouts counted as throughput.
+
+**The work was identical in all four. Every difference above is who waits.**
 
 ---
 
