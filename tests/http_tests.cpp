@@ -2,10 +2,13 @@
 #include <doctest/doctest.h>
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include "http/request.hpp"
+#include "http/response.hpp"
+#include "load/http11_get.hpp"
 
 using namespace dariyaraah::http;
 using namespace std;
@@ -72,4 +75,38 @@ TEST_CASE("the parser has no opinion about methods or versions") {
     REQUIRE(request.has_value());
     CHECK(request->method == "BREW");
     CHECK(request->version == "HTTP/9.9");
+}
+
+// ---------------------------------------------------------------------------
+// write_response
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a response serialises to exactly the expected bytes") {
+    string out = "left over from the previous request";
+    write_response({200, "OK", "hello"}, out);
+    CHECK(out == "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+
+    // An empty body is a length of zero, not an absent header: dariyanaap
+    // treats a body it cannot frame as a protocol error, and rightly.
+    write_response({404, "Not Found", ""}, out);
+    CHECK(out == "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+}
+
+TEST_CASE("the client that will read this agrees it is a whole response") {
+    // The test that matters, and the reason the rig is linked into this suite.
+    // Asserting the bytes above only proves they match what this repo expected;
+    // this asserts they match what dariyanaap's parser will actually do with
+    // them, which is the thing every measurement depends on.
+    const dariyanaap::Http11Get protocol("127.0.0.1", "/");
+    string out;
+    write_response({200, "OK", "hello"}, out);
+    const span<const char> bytes{out.data(), out.size()};
+
+    CHECK(protocol.consume(bytes) == dariyanaap::ResponseState::Complete);
+    CHECK(protocol.succeeded(bytes));
+
+    // And one byte short is not complete — so "Complete" above means framed,
+    // not merely parsed far enough to look plausible.
+    CHECK(protocol.consume(bytes.first(bytes.size() - 1)) ==
+          dariyanaap::ResponseState::NeedMore);
 }
