@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "core/endpoint.hpp"
@@ -33,7 +34,18 @@ public:
     // the listener stops accepting.
     void run();
 
+    // Make run() return. Safe to call from another thread, which is the only
+    // place it can be called from, since run() does not come back on its own.
+    //
+    // There is no portable way to interrupt a blocking accept(), and closing
+    // the listener's descriptor underneath it is the kind of undefined
+    // behaviour that works until it does not. So this connects to the listener
+    // to give accept() something to return, and run() checks the flag before
+    // doing anything with it. Unit 0's test target settled on the same trick.
+    void stop();
+
 private:
+    std::atomic<bool> stopping_{false};
     dariyanaap::Listener listener_;
 };
 
