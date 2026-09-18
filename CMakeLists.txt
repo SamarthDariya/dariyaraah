@@ -125,7 +125,7 @@ add_library(doctest::doctest ALIAS doctest_headers)
 # src/ is on the include path as a root, so an include reads "http/request.hpp"
 # and says which layer it came from. PUBLIC because tests and apps both need it.
 
-add_library(dariyaraah_http src/http/request.cpp)
+add_library(dariyaraah_http src/http/request.cpp src/http/response.cpp)
 target_include_directories(dariyaraah_http PUBLIC src)
 target_compile_options(dariyaraah_http PRIVATE ${DARIYARAAH_WARNINGS})
 
