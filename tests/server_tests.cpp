@@ -72,3 +72,27 @@ TEST_CASE("the rig can put load on a real server, and Little's law holds") {
     CHECK(run.result.latency->per_second() <= 210.0);
     CHECK(run.result.latency->per_second() > 50.0);
 }
+
+TEST_CASE("a pool bounds throughput by its workers, not by its connections") {
+    // M3's finding, pinned. Two workers, eight connections: a worker holds a
+    // keep-alive connection for that connection's whole life, so six of the
+    // eight are never served at all and throughput is 2/service_time rather
+    // than 8/service_time. Under M1's model the same plan gives ~328 rps.
+    Server server("127.0.0.1", 0, 2);
+    thread accepting([&server] { server.run(); });
+
+    ClosedLoopPlan plan;
+    plan.target = Endpoint("127.0.0.1", server.port());
+    plan.connections = 8;
+    plan.duration = Millis(1000);
+    const Http11Get protocol("127.0.0.1", "/");
+    const ClosedLoopRun run = run_closed_loop(protocol, plan);
+
+    server.stop();
+    accepting.join();
+
+    REQUIRE(run.result.latency.has_value());
+    // The discriminating number: two workers behind a ~24ms handler cannot
+    // exceed ~82 rps. Eight threads would be four times that.
+    CHECK(run.result.latency->per_second() < 150.0);
+}
