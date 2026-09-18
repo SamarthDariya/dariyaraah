@@ -80,8 +80,11 @@ see DESIGN.md.
 
 ## Checkpoints
 
-Each milestone ends in something runnable or measurable, lives on its own `feature/*` branch, and is
-merged by PR.
+Each milestone ends in something runnable or measurable. Unlike the earlier repos in this series,
+work lands directly on `main` in small commits rather than on a `feature/*` branch merged by PR — the
+unit is two days long, nobody is reviewing a pull request, and a branch per milestone would be
+ceremony around a single author. The commits are the review surface instead, so they are kept small
+enough to read one at a time.
 
 ### M0 — Skeleton ✅
 - [x] CMake, C++20, `RelWithDebInfo` by default — no number comes from a `-O0` build
