@@ -128,3 +128,31 @@ TEST_CASE("an event loop with a blocking handler serves one request at a time") 
     // alone does not show.
     CHECK(run.result.latency->p50 > kDatabaseDelay * 2);
 }
+
+TEST_CASE("a timer lets one thread hold many requests in flight at once") {
+    // E4b against E4a, in one assertion. The same single thread, the same
+    // handler, the same 20ms — but the wait is a kqueue timer instead of a
+    // sleep, so eight connections overlap instead of queueing.
+    Server server("127.0.0.1", 0, 0, LoopMode::DatabaseTimer);
+    thread accepting([&server] { server.run(); });
+
+    ClosedLoopPlan plan;
+    plan.target = Endpoint("127.0.0.1", server.port());
+    plan.connections = 8;
+    plan.duration = Millis(1000);
+    const Http11Get protocol("127.0.0.1", "/");
+    const ClosedLoopRun run = run_closed_loop(protocol, plan);
+
+    server.stop();
+    accepting.join();
+
+    CHECK(run.result.errors.total() == 0);
+    REQUIRE(run.result.latency.has_value());
+
+    // Blocking gives 42 rps here regardless of connections; overlapping gives
+    // 8/service_time, about 330. Anything above 150 can only be the second.
+    CHECK(run.result.latency->per_second() > 150.0);
+
+    // And nobody queued: each request costs one service time, not eight.
+    CHECK(run.result.latency->p50 < kDatabaseDelay * 3);
+}
