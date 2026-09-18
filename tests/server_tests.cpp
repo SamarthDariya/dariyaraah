@@ -96,3 +96,35 @@ TEST_CASE("a pool bounds throughput by its workers, not by its connections") {
     // exceed ~82 rps. Eight threads would be four times that.
     CHECK(run.result.latency->per_second() < 150.0);
 }
+
+TEST_CASE("an event loop with a blocking handler serves one request at a time") {
+    // M4's first finding, and the test that would have caught the empty-buffer
+    // bug in an hour rather than at the first curl. Four connections against
+    // one thread that sleeps inside the handler: requests serialise, so
+    // throughput is 1/service_time regardless of how many clients there are.
+    Server server("127.0.0.1", 0, 0, /*event_loop=*/true);
+    thread accepting([&server] { server.run(); });
+
+    ClosedLoopPlan plan;
+    plan.target = Endpoint("127.0.0.1", server.port());
+    plan.connections = 4;
+    plan.duration = Millis(1000);
+    const Http11Get protocol("127.0.0.1", "/");
+    const ClosedLoopRun run = run_closed_loop(protocol, plan);
+
+    server.stop();
+    accepting.join();
+
+    CHECK(run.result.errors.total() == 0);
+    REQUIRE(run.result.latency.has_value());
+
+    // The discriminating number. Thread-per-connection serves these four in
+    // parallel at ~164 rps; one blocking thread serves them one after another
+    // at ~42. Anything under 80 can only be the second.
+    CHECK(run.result.latency->per_second() < 80.0);
+
+    // And each client waits behind the other three, so latency is roughly four
+    // service times rather than one. This is the cost the throughput number
+    // alone does not show.
+    CHECK(run.result.latency->p50 > kDatabaseDelay * 2);
+}
