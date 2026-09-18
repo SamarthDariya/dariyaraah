@@ -33,4 +33,19 @@ inline constexpr std::size_t kMaxHeaderBytes = 16 * 1024;
 std::optional<std::size_t> read_request(dariyanaap::Socket& client, std::string& received,
                                         std::vector<char>& scratch);
 
+// One read per request in the common case: a header block is well under this.
+inline constexpr std::size_t kReadChunkBytes = 8 * 1024;
+
+// Serve requests on `client` until it goes away. This is the body of a thread,
+// and M1's entire threading model is that there is one of these per connection.
+//
+// Takes the socket by value and owns it: the thread outlives the accept loop's
+// stack frame, and a reference would dangle the moment the loop came round
+// again. Closing is the destructor's job.
+//
+// Never throws. That is not politeness — an exception escaping a thread's
+// entry point calls std::terminate, so one client hitting a read timeout would
+// take down a server that is otherwise serving 499 other connections perfectly.
+void serve_connection(dariyanaap::Socket client);
+
 }  // namespace dariyaraah
