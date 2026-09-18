@@ -413,6 +413,68 @@ exactly how the discipline slips.
 
 ---
 
+## Little's law, derived rather than recited
+
+The track says this unit earns `02-estimation` because "you will derive Little's law yourself". It
+was not derived. It kept turning up, uninvited, in every experiment — so here it is, checked against
+all four models at once.
+
+**L = λ × W.** Requests in flight = throughput × latency.
+
+| model | conns | λ (req/s) | W (p50) | λ × W | connections |
+|---|---|---|---|---|---|
+| thread per connection | 1 | 41 | 24.77 ms | **1.02** | 1 |
+| thread per connection | 32 | 1,291 | 24.90 | **32.1** | 32 |
+| thread per connection | 500 | 19,525 | 25.69 | **501.6** | 500 |
+| thread per connection | 3,000 | 74,872 | 38.80 | **2,905** | 3,000 |
+| pool of 32 | 32 | 1,333 | 24.38 | **32.5** | 32 |
+| event loop, blocking | 8 | 42 | 167.77 | **7.05** | 8 |
+| event loop + timer | 500 | 19,207 | 25.82 | **495.9** | 500 |
+| **pool of 32** | **500** | 1,441 | 24.90 | **35.9** | **500** |
+
+Seven rows land within 4% of the connection count, across four mechanisms that share nothing but a
+20 ms handler — a thread per client, a fixed pool, one thread sleeping, one thread with timers.
+Nothing was tuned to make that happen and nothing could have prevented it. It is arithmetic.
+
+**The eighth row is the useful one.** Five hundred connections, and L comes out at 35.9. The law is
+not broken; it is answering the question actually asked — how many requests were *in the system* —
+and the answer is thirty-six, not five hundred. The other 464 were never being served.
+
+Which is a correction to E3's conclusion, and a better ending than E3 had. Latency percentiles alone
+cannot see starvation: p50 sat at a healthy 24.90 ms while two thirds of clients were refused.
+**Latency times throughput can.** L = λW recovers the true concurrency, and comparing it to the
+offered concurrency is a starvation detector built out of two numbers every monitoring system already
+has.
+
+### What it is for
+
+Read the other way, it is the whole of capacity estimation:
+
+> **concurrency = throughput × latency**, so serving 10,000 rps at 25 ms needs **250 requests in
+> flight** — 250 threads, or 250 parked timers, or 250 of whatever your model makes concurrency out
+> of.
+
+That sentence is the answer to most of the "how many servers do you need" questions in a design
+interview, and it is now backed by 34 measured rows rather than by having read it. The corollary
+matters as much: **you cannot buy throughput by reducing latency below the point where concurrency is
+the binding constraint** — E1 added throughput only by adding connections, and E4a could not add any
+at all, because its concurrency was pinned at one.
+
+### The verifier the track asked for
+
+> *predicted vs measured throughput, and the concurrency at which p99 detaches from p50.*
+
+Predicted vs measured, per model: 48 rps/connection predicted against 41 measured (E1, the model
+right and the constant wrong); the flatline predicted at `workers / service_time` and measured at
+1,365 against 1,310 predicted (E3); `1 / service_time` predicted and measured (E4a).
+
+**The concurrency at which p99 detaches from p50: there isn't one.** Not at any point in a
+closed-loop ramp from 1 to 3,000 connections, where the ratio drifts from 1.04 to 1.48. Under
+open-loop overload it rises to 1.98 with *both* percentiles leaving 20 ms together. The question
+presupposes an answer the measurements do not support, and unit 0's E2 said so first.
+
+---
+
 ## Carried forward
 
 Numbers this unit establishes that later units quote rather than re-derive.
