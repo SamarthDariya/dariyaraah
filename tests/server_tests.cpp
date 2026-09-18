@@ -1,11 +1,17 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include <thread>
+
 #include "core/clock.hpp"
+#include "load/closed_loop.hpp"
+#include "load/http11_get.hpp"
 #include "server/handler.hpp"
+#include "server/server.hpp"
 
 using namespace dariyaraah;
 using namespace dariyanaap;
+using namespace std;
 
 TEST_CASE("GET / is served, and anything else is refused") {
     const http::Response ok = handle({"GET", "/", "HTTP/1.1"});
@@ -31,4 +37,38 @@ TEST_CASE("the database call is really twenty milliseconds, and really in the ha
     const MonotonicClock::Instant refused_at = MonotonicClock::now();
     CHECK(handle({"GET", "/health", "HTTP/1.1"}).status == 404);
     CHECK(MonotonicClock::since(refused_at) < kDatabaseDelay);
+}
+
+// ---------------------------------------------------------------------------
+// End to end
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the rig can put load on a real server, and Little's law holds") {
+    Server server("127.0.0.1", 0);  // ephemeral: two suites must not collide
+    thread accepting([&server] { server.run(); });
+
+    ClosedLoopPlan plan;
+    plan.target = Endpoint("127.0.0.1", server.port());
+    plan.connections = 4;
+    plan.duration = Millis(500);
+    const Http11Get protocol("127.0.0.1", "/");
+    const ClosedLoopRun run = run_closed_loop(protocol, plan);
+
+    server.stop();
+    accepting.join();
+
+    CHECK(run.result.errors.total() == 0);
+    REQUIRE(run.result.latency.has_value());
+
+    // Every request pays the database call. If this fails, the 20ms is not on
+    // the path the client's requests take.
+    CHECK(run.result.latency->p50 >= kDatabaseDelay);
+
+    // The first appearance of the number this whole repo is about: four
+    // connections, each serialised behind a 20ms handler, cannot exceed
+    // 4 / 0.02s = 200 rps. Asserted as a ceiling rather than a range, because
+    // a ceiling is physics and a range is a guess about this machine's mood —
+    // and under TSan the mood is very different.
+    CHECK(run.result.latency->per_second() <= 210.0);
+    CHECK(run.result.latency->per_second() > 50.0);
 }
