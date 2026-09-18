@@ -44,9 +44,34 @@ Ramp `--connections` 1 → 2 → 4 → 8 → 16 → 32 → 64 → 128 → 256 �
 `sleep_for` in the handler. Server thread count equals connection count (decision 2), so this ramps
 the server's concurrency from the client side.
 
-**Samarth's prediction:** *(written before the run — throughput and p99 at 1, 50 and 500)*
+**Samarth's prediction:** *not recorded.* Rule 4 says a prediction filled in afterwards is worth
+nothing, so the slot stays empty rather than being back-filled. That is now the fourth time across
+two repos, and the honest reading is that the discipline is the hard part, not the code.
 
-**Claude's prediction:** *(committed after Samarth's, before M2's code)*
+**Claude's prediction**, committed before the sweep script existed:
+
+| connections | throughput | p50 | p99 |
+|---|---|---|---|
+| 1 | ~48 rps | 20.3 ms | ~21 ms |
+| 50 | ~2,400 rps | 20.5 ms | ~23 ms |
+| 500 | ~23,000 rps | ~21 ms | ~35 ms |
+
+And three specific claims, so that being wrong is cheap to detect:
+
+1. **Throughput is linear in connections across the whole ramp, and does not flatline.** The brief
+   says it flatlines at `threads / 0.02s` — but under *closed-loop* against a thread-per-connection
+   server, threads *are* connections, so that ceiling rises with every connection added. The flatline
+   the brief describes needs the thread count held fixed, which is M3, or the load decoupled from the
+   replies, which is E2.
+2. **p99 does not detach from p50.** Both stay within a factor of two of each other at every step.
+   This sides with unit 0's E2 against the brief, and for the reason E2 gave: past saturation the
+   delay is queueing, and queueing delays every request equally.
+3. **The naive server does not collapse at 500 connections.** A 20ms sleep means each thread wakes
+   ~49 times a second, so 500 threads is ~24,000 wakeups a second — far under what the scheduler can
+   do. The brief's "collapses on context switching well before the CPU is busy" assumes a handler
+   that computes; a handler that sleeps is the cheapest possible thread to have around. If collapse
+   appears at all it is thousands of connections away, and `kern.ipc.somaxconn` = 128 will produce
+   connect errors long before the scheduler does.
 
 - **Measured:**
 - **Wrong about:**
@@ -59,9 +84,26 @@ mode where the queue is outside the service.
 Watch for `connection_wait` in the rig's output: past the knee it is the pool being too small, not
 the rig falling behind — which is unit 0's E5 and the reason these runs are legible at all.
 
-**Samarth's prediction:**
+**Samarth's prediction:** *not recorded,* as above.
 
-**Claude's prediction:**
+**Claude's prediction**, same commit, 32 connections — a knee at `32 / 0.0205s` ≈ 1,560 rps:
+
+| offered | achieved | p50 | p99 | `connection_wait` p50 |
+|---|---|---|---|---|
+| 800 rps | ~800 | 20.5 ms | ~22 ms | ~0 |
+| 1,500 rps | ~1,500 | ~21 ms | ~30 ms | ~1 ms |
+| 3,200 rps | ~1,560 | **~1,200 ms** | ~2,400 ms | ~1,200 ms |
+
+The claim worth being wrong about: **neither mode produces the shape the brief describes.** "p50
+stays ~20ms while p99 goes to hundreds" requires a queue that forms and drains — a *transient*. Under
+a sustained 2× overload the queue never drains, so latency-from-due grows roughly linearly across the
+measured window, which puts p50 near half the maximum and p99 near all of it. Both percentiles leave
+20ms together, and the ratio settles near 2.
+
+If that is right, the brief is describing a stall rather than a ramp — which is unit 0's E3, not this
+unit's E1 — and the reconciliation is that queueing is uniform whoever is doing the queueing. If it
+is wrong, the interesting question is what makes the tail selective, and that is a better finding
+than the prediction would have been.
 
 - **Measured:**
 - **Wrong about:**
