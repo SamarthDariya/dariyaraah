@@ -36,6 +36,40 @@ if(DARIYARAAH_WERROR)
 endif()
 
 # ---------------------------------------------------------------------------
+# Sanitizers
+# ---------------------------------------------------------------------------
+#
+# TSan is the one this repo is built around. M3 replaces a thread per
+# connection with a bounded pool behind a shared queue, which is the first
+# genuinely concurrent data structure in the series that is not
+# one-histogram-per-thread — and a work queue that is subtly wrong does not
+# crash, it drops or double-serves a request and reports a throughput number
+# for it.
+#
+# Mutually exclusive because ASan and TSan cannot be linked into the same
+# binary, and finding that out from a linker error is worse than being told.
+option(DARIYARAAH_ASAN "Build with AddressSanitizer + UBSan" OFF)
+option(DARIYARAAH_TSAN "Build with ThreadSanitizer"          OFF)
+
+if(DARIYARAAH_ASAN AND DARIYARAAH_TSAN)
+  message(FATAL_ERROR "DARIYARAAH_ASAN and DARIYARAAH_TSAN cannot both be enabled")
+endif()
+
+# -UNDEBUG re-enables assert() in the sanitizer builds. RelWithDebInfo defines
+# NDEBUG, which is right for the build that produces measurements and wrong for
+# the builds whose whole job is finding bugs. It comes after the build-type
+# flags, so it wins.
+if(DARIYARAAH_ASAN)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g -UNDEBUG)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+if(DARIYARAAH_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g -UNDEBUG)
+  add_link_options(-fsanitize=thread)
+endif()
+
+
+# ---------------------------------------------------------------------------
 # doctest
 # ---------------------------------------------------------------------------
 #
