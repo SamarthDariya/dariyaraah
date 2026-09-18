@@ -75,7 +75,7 @@ see DESIGN.md.
 
 ## Status
 
-**M4 complete. Four models measured. One thread matches five hundred.**
+**Complete — M0 through M5, E1 through E4b.**
 
 | Milestone | What lands | Status |
 |---|---|---|
@@ -84,7 +84,24 @@ see DESIGN.md.
 | M2 — The ramp | predictions committed first, then E1 and E2 | ✅ |
 | M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | ✅ |
 | M4 — Event loop | one thread, `kqueue`, E4a blocking and E4b with the wait as a timer | ✅ |
-| M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | |
+| M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | ✅ |
+
+---
+
+## What it answers
+
+**L = λ × W.** Requests in flight = throughput × latency. It holds within 4% across all four
+threading models — see [Little's law, derived](BREAK.md#littles-law-derived-rather-than-recited) —
+and read the other way it is capacity estimation entire:
+
+> serving 10,000 rps at 25ms needs **250 requests in flight** — 250 threads, or 250 parked timers, or
+> 250 of whatever your model makes concurrency out of.
+
+The row where it appears to fail is the most useful one. A pool of 32 workers, offered 500
+connections, reports `λ × W` = **35.9**. The law is not broken: it is answering how many requests were
+*in the system*, and the answer is thirty-six. The other 464 were never being served. So **latency
+percentiles cannot see starvation, but latency times throughput can** — a detector built from two
+numbers every monitoring system already collects.
 
 ---
 
@@ -169,6 +186,12 @@ curiosity. The only number produced so far is the end-to-end test's ceiling, whi
       95 → 448 → 968
 - [x] green under plain, ASan/UBSan and TSan with pool, queue, accept loop and rig all live
 
+### M5 — Write-up ✅
+- [x] Little's law checked against all four models: **within 4% on seven rows**, and the eighth row's
+      deviation *is* the starvation signal
+- [x] both of DESIGN.md's open questions settled by what happened, not by argument
+- [x] the track's verifier answered, including the part where the question was wrong
+
 ### M4 — Event loop ✅
 - [x] `EventLoop` — a thin kqueue, level-triggered, with timers
 - [x] **E4a: the blocking loop**, built naive first — 42 rps flat, 21× worse than either threaded
@@ -195,6 +218,19 @@ timeouts counted as throughput.
 
 **The work was identical in all four. Every difference above is who waits.**
 
+### What this unit was wrong about
+
+Five experiments, four predicted, and the pattern in the errors turned out to be worth more than the
+comparison. **Three of the four wrong predictions were wrong about the instrument, not the system:**
+`sleep_for(20ms)` is really 23.4ms (E1); a timed-out request enters the histogram at its true elapsed
+time, so p99 spikes to the read timeout (E3) and throughput counts failures as work (E4a). The
+system under test behaved as predicted almost every time. What kept being mis-modelled was the thing
+doing the measuring.
+
+And once, in E1, a **1-in-7 outlier was about to become the finding** — p99 of 63.18ms at 500
+connections, which reads exactly like the tail detaching. Five repeats gave 29ms. The effect being
+looked for was the same size as the run-to-run noise.
+
 ---
 
 ## What unit 0 says to know before reading any number here
@@ -219,3 +255,5 @@ Track rule 5 is "cap the scope", and this unit's stop-here line is short: `GET /
 | Keep-alive tuning, pipelining | the rig sends one request at a time per connection; matching it is the honest baseline |
 | A real database | the 20ms sleep *is* the experiment. A real one adds variance and teaches nothing here |
 | Load balancing across instances | that is unit 2, `dariyabaant` |
+| Non-blocking writes | the loop is level-triggered and uses kqueue for readiness only. One slow client reading a byte at a time would stall it inside `write_all`; a production server needs an outbound queue per connection. Stated in DESIGN.md rather than discovered by a reader |
+| Anything past 3,000 connections | the rig collapses at 4,000 before the server does. Measuring further would mean measuring the machine |
