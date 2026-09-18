@@ -11,6 +11,17 @@
 
 namespace dariyaraah {
 
+// Which event loop, if any.
+//
+// Two are kept rather than one replacing the other, because E4a and E4b are
+// separate findings and a repo that deletes the slow one keeps the conclusion
+// while throwing away the evidence.
+enum class LoopMode {
+    Off,              // M1's threads, or M3's pool
+    BlockingHandler,  // E4a: one thread, and handle() still sleeps in it
+    DatabaseTimer,    // E4b: the database call becomes a kqueue timer
+};
+
 // How long an accepted connection may say nothing before it is dropped.
 //
 // Accepted sockets inherit no timeouts from the listener, and without one a
@@ -43,11 +54,9 @@ public:
     // Anything else is M3's: that many threads, and a bounded queue of accepted
     // connections between them and the accept loop.
     //
-    // `event_loop` overrides both with M4's: one thread, kqueue, and no
-    // concurrency at all while the handler is blocking. That last clause is the
-    // experiment, not a caveat.
+    // Anything but LoopMode::Off overrides `workers` with M4's one thread.
     Server(const std::string& host, std::uint16_t port, std::size_t workers = 0,
-           bool event_loop = false);
+           LoopMode loop = LoopMode::Off);
 
     // The port actually bound, for when port 0 was asked for.
     std::uint16_t port() const { return listener_.port(); }
@@ -80,7 +89,7 @@ private:
     void run_event_loop();
 
     std::size_t workers_;
-    bool event_loop_;
+    LoopMode loop_;
     std::atomic<bool> stopping_{false};
     dariyanaap::Listener listener_;
 };

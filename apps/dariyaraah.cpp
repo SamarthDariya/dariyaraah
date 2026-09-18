@@ -32,7 +32,9 @@ int main(int argc, char** argv) {
                   "  --port P     0 for a kernel-chosen port (default 8080)\n"
                   "  --workers N  bounded pool of N threads; 0 (default) is a\n"
                   "               thread per connection\n"
-                  "  --event-loop 1   one thread and kqueue, overriding --workers\n",
+                  "  --event-loop N   one thread and kqueue, overriding --workers:\n"
+                  "               1 = the handler still blocks (E4a)\n"
+                  "               2 = the database call becomes a timer (E4b)\n",
                   stdout);
             return 0;
         }
@@ -43,17 +45,26 @@ int main(int argc, char** argv) {
             throw UsageError("--port must be at most 65535");
         }
         const uint64_t workers = flags.number("workers", 0);
-        const bool event_loop = flags.number("event-loop", 0) != 0;
+        // 1 and 2 are E4a and E4b, and the flag says so in --help. Both are
+        // kept: they are separate findings, and deleting the slow one would
+        // keep the conclusion while throwing away the evidence.
+        const uint64_t loop_choice = flags.number("event-loop", 0);
+        if (loop_choice > 2) {
+            throw UsageError("--event-loop must be 0, 1 or 2");
+        }
+        const LoopMode loop = loop_choice == 0   ? LoopMode::Off
+                              : loop_choice == 1 ? LoopMode::BlockingHandler
+                                                 : LoopMode::DatabaseTimer;
 
-        Server server(host, static_cast<uint16_t>(port), static_cast<size_t>(workers),
-                      event_loop);
+        Server server(host, static_cast<uint16_t>(port), static_cast<size_t>(workers), loop);
         // The threading model is printed, not just configured. A sweep that
         // compares two models across runs has to be able to tell from the log
         // which one a given run was, or the comparison is an act of faith.
-        const string model = event_loop ? "single-threaded event loop (kqueue)"
-                             : workers == 0
-                                 ? "thread per connection"
-                                 : "pool of " + to_string(workers) + " workers";
+        const string model =
+            loop == LoopMode::BlockingHandler ? "event loop, blocking handler (kqueue)"
+            : loop == LoopMode::DatabaseTimer ? "event loop, database as a timer (kqueue)"
+            : workers == 0                    ? "thread per connection"
+                                              : "pool of " + to_string(workers) + " workers";
         printf("listening %s:%u  GET / -> 200 after %lldms, %s\n", host.c_str(), server.port(),
                static_cast<long long>(kDatabaseDelay.count()),
                model.c_str());

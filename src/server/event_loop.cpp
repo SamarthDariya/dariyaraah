@@ -57,6 +57,16 @@ void EventLoop::unwatch_read(int fd) {
     (void)kevent(kq_, &change, 1, nullptr, 0, nullptr);
 }
 
+void EventLoop::arm_timer(uintptr_t ident, dariyanaap::Millis after) {
+    struct kevent change;
+    // Zero fflags means milliseconds on macOS, which is the unit Millis is in.
+    EV_SET(&change, ident, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0,
+           static_cast<intptr_t>(after.count()), nullptr);
+    if (kevent(kq_, &change, 1, nullptr, 0, nullptr) < 0) {
+        throw failure("kevent EVFILT_TIMER", errno);
+    }
+}
+
 const vector<Event>& EventLoop::wait(dariyanaap::Millis timeout) {
     struct kevent events[kMaxEventsPerWake];
     const timespec deadline{timeout.count() / 1000,

@@ -45,8 +45,24 @@ public:
     void watch_read(int fd);
 
     // Stop watching. Closing a descriptor removes it from the kqueue anyway,
-    // so this is for the case where the socket outlives its interest.
+    // so this is for the case where the socket outlives its interest — which is
+    // exactly what happens while a connection waits on the database: its socket
+    // is alive and idle, and a level-triggered loop would otherwise report it
+    // readable on every pass and spin.
     void unwatch_read(int fd);
+
+    // Report `ident` back as a Timer event once, `after` from now.
+    //
+    // The whole of M4's second half. A connection waiting twenty milliseconds
+    // for a database is indistinguishable, to this loop, from a socket waiting
+    // for bytes — both are "wake me when something happens", and making them
+    // the same kind of thing is what lets one thread hold thousands of requests
+    // in flight.
+    //
+    // EV_ONESHOT so it deletes itself when it fires. ident is the connection's
+    // descriptor, which cannot collide with the read registration because
+    // kqueue keys on (ident, filter) rather than ident alone.
+    void arm_timer(std::uintptr_t ident, dariyanaap::Millis after);
 
     // Block until something is ready, or until `timeout` passes. The returned
     // span is valid until the next call: the buffer belongs to the loop, so a

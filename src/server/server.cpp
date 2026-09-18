@@ -22,14 +22,14 @@ using namespace std;
 
 namespace dariyaraah {
 
-Server::Server(const string& host, uint16_t port, size_t workers, bool event_loop)
+Server::Server(const string& host, uint16_t port, size_t workers, LoopMode loop)
     : workers_(workers),
-      event_loop_(event_loop),
+      loop_(loop),
       listener_(port == 0 ? dariyanaap::Listener::bind_ephemeral(host)
                           : dariyanaap::Listener::bind(dariyanaap::Endpoint(host, port))) {}
 
 void Server::run() {
-    if (event_loop_) {
+    if (loop_ != LoopMode::Off) {
         run_event_loop();
     } else if (workers_ == 0) {
         run_thread_per_connection();
@@ -90,6 +90,12 @@ namespace {
 // Everything one connection needs, for a loop that owns them all at once.
 // M1 and M3 keep this on a thread's stack; here it has to be somewhere the
 // single thread can put it down and pick up again.
+// Where a connection is up to. Reading is the only state M1 and M3 ever have,
+// because there a thread waiting on the database is simply blocked and the
+// state lives in its stack frame. One thread serving everything has to write it
+// down.
+enum class Phase { Reading, WaitingOnDatabase };
+
 struct Parked {
     // A constructor rather than aggregate initialisation, and not for style.
     // Parked{socket, {}, {}, {}} compiles, and the trailing {} overrides
@@ -104,6 +110,12 @@ struct Parked {
     string received;
     string out;
     vector<char> scratch = vector<char>(kReadChunkBytes);
+
+    Phase phase = Phase::Reading;
+    // Bytes of `received` the parked request occupies. Nothing is read into the
+    // buffer while parked — the socket is unwatched — so the request is still
+    // there, unmoved, when the timer fires.
+    size_t length = 0;
 };
 
 // One turn: read what is there, and serve a request if a whole one has arrived.
@@ -112,6 +124,17 @@ struct Parked {
 // The handler BLOCKS for 20ms inside here, which is M4's first experiment. One
 // thread plus a blocking handler means one request at a time for the whole
 // server, and the point is to measure how bad that is rather than to assume it.
+// Read once into the connection's buffer. False when the client hung up.
+bool read_more(Parked& parked) {
+    assert(!parked.scratch.empty() && "read buffer must have room in it");
+    const size_t got = parked.client.read_some({parked.scratch.data(), parked.scratch.size()});
+    if (got == 0) {
+        return false;
+    }
+    parked.received.append(parked.scratch.data(), got);
+    return true;
+}
+
 bool serve_one_turn(Parked& parked) {
     try {
         // Asserted rather than assumed: a zero-length buffer makes read_some
@@ -145,6 +168,52 @@ bool serve_one_turn(Parked& parked) {
 
 }  // namespace
 
+// Answer the request occupying the first `length` bytes, and consume them.
+// Returns false when the connection is finished.
+bool answer_now(Parked& parked, size_t length) {
+    const optional<http::Request> request = http::parse_request_line(parked.received);
+    const http::Response response =
+        request ? route(*request) : http::Response{400, "Bad Request", ""};
+    http::write_response(response, parked.out);
+    parked.received.erase(0, length);
+    parked.client.write_all({parked.out.data(), parked.out.size()});
+    return request.has_value();
+}
+
+// Begin on whatever is buffered: park on a timer if answering costs the
+// database, answer immediately if it does not, and go back to reading when
+// there is no whole request left.
+//
+// The request is re-parsed when the timer fires rather than being carried
+// across the wait. Request borrows from `received`, and a Response may borrow
+// from a Request, so holding either across a park would be a lifetime bet on
+// what route() happens to return today. Parsing twice costs a scan of a few
+// hundred bytes and costs nothing to reason about.
+bool begin_next(Parked& parked, EventLoop& loop, int fd) {
+    for (;;) {
+        const optional<size_t> length = http::find_header_end(parked.received);
+        if (!length) {
+            parked.phase = Phase::Reading;
+            loop.watch_read(fd);
+            return parked.received.size() <= kMaxHeaderBytes;
+        }
+
+        const optional<http::Request> request = http::parse_request_line(parked.received);
+        if (request && needs_database(route(*request))) {
+            parked.phase = Phase::WaitingOnDatabase;
+            parked.length = *length;
+            // Unwatched while waiting, or a level-triggered loop would report
+            // this socket readable on every pass and spin at 100% CPU.
+            loop.unwatch_read(fd);
+            loop.arm_timer(static_cast<uintptr_t>(fd), kDatabaseDelay);
+            return true;
+        }
+        if (!answer_now(parked, *length)) {
+            return false;
+        }
+    }
+}
+
 void Server::run_event_loop() {
     EventLoop loop;
     loop.watch_read(listener_.fd());
@@ -166,7 +235,27 @@ void Server::run_event_loop() {
             }
 
             const auto found = parked.find(fd);
-            if (found != parked.end() && !serve_one_turn(found->second)) {
+            if (found == parked.end()) {
+                continue;
+            }
+
+            bool alive = false;
+            try {
+                if (event.kind == EventKind::Timer) {
+                    // The database call has returned. Same work the other
+                    // models do on a thread; nobody was blocked waiting for it.
+                    alive = answer_now(found->second, found->second.length) &&
+                            begin_next(found->second, loop, fd);
+                } else if (loop_ == LoopMode::DatabaseTimer) {
+                    alive = read_more(found->second) && begin_next(found->second, loop, fd);
+                } else {
+                    alive = serve_one_turn(found->second);
+                }
+            } catch (const dariyanaap::IoError&) {
+                alive = false;
+            }
+
+            if (!alive) {
                 loop.unwatch_read(fd);
                 parked.erase(found);  // the Socket's destructor closes it
             }

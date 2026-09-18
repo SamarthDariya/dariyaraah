@@ -102,7 +102,7 @@ TEST_CASE("an event loop with a blocking handler serves one request at a time") 
     // bug in an hour rather than at the first curl. Four connections against
     // one thread that sleeps inside the handler: requests serialise, so
     // throughput is 1/service_time regardless of how many clients there are.
-    Server server("127.0.0.1", 0, 0, /*event_loop=*/true);
+    Server server("127.0.0.1", 0, 0, LoopMode::BlockingHandler);
     thread accepting([&server] { server.run(); });
 
     ClosedLoopPlan plan;
