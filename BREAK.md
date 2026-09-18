@@ -369,12 +369,47 @@ becomes a `kqueue` timer, with the connection parked until it fires. `handle()` 
 plus a declared delay, so all four models still do identical work and only *who waits* differs —
 which is what a threading model is.
 
-**Samarth's prediction:**
+**Samarth's prediction:** *not recorded,* as before.
 
-**Claude's prediction:**
+**Claude's prediction:** *numerically not recorded* — and that is a lapse worth writing down rather
+than hiding, because it is the same one unit 0 made three times. The design was committed before the
+code (the split into `route()` plus a declared delay, in the commit that created these slots), and the
+claim "this should produce the best numbers in the unit" was made in conversation. But **no table was
+written before the run**, so there is nothing here to be wrong against. Four experiments predicted
+properly, one not, and the one not predicted is the one whose result was most expected — which is
+exactly how the discipline slips.
 
-- **Measured:**
-- **Wrong about:**
+- **Measured:** `MODE=2 ./scripts/e4-loop.sh`, 3s after 500ms warm-up per step, beside M1's numbers
+  from E1 at the same steps.
+
+  | conns | **E4b** req/s | E4b p50 | E4b p99 | M1 req/s | M1 p50 | M1 p99 |
+  |---|---|---|---|---|---|---|
+  | 1 | 42 | 24.38 ms | 25.82 | 41 | 24.77 | 25.69 |
+  | 8 | 327 | 24.64 | 25.82 | 328 | 24.90 | 25.69 |
+  | 32 | 1,289 | 24.90 | 26.48 | 1,291 | 24.90 | 26.21 |
+  | 128 | 5,117 | 25.17 | 27.79 | 5,096 | 25.04 | 26.48 |
+  | 256 | 10,133 | 25.30 | 30.15 | 10,164 | 25.30 | 28.71 |
+  | 500 | **19,207** | 25.82 | 30.54 | 19,525 | 25.69 | 29.10 |
+
+  Zero errors at every step. **One thread reaches 98.4% of what five hundred threads reach**, with p50
+  within 0.13 ms and p99 within 1.4 ms of them.
+
+  Against E4a at 32 connections — the same single thread, the same handler, the same 20 ms — it is
+  **21× faster** (1,289 rps against 61). Nothing changed except who does the waiting.
+
+- **Wrong about:** nothing measurable, having failed to write a number down. Two things are worth
+  recording anyway.
+
+  **The result is more complete than expected.** "Comparable to thread-per-connection" would have been
+  a good outcome; matching it to within 2% across three orders of magnitude, with 500 timers armed
+  concurrently and no errors, is a stronger claim than seemed safe to make. The event loop is not a
+  trade — at this workload it is strictly better, because it buys the same throughput without 500
+  thread stacks.
+
+  **The 500-thread model is not embarrassed by this, and that is the honest reading.** M1 held its
+  own to 3,000 connections (E1) and the machine, not the design, is what eventually gave way. The
+  case for the event loop here is not speed. It is that it reaches the same speed at a resource cost
+  that keeps going: E1 needed 3,000 OS threads to get its ceiling, and this needs one.
 
 ---
 

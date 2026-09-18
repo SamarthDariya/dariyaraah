@@ -4,9 +4,9 @@
 #
 #     ./scripts/e4-loop.sh [out-dir]
 #
-# MODEL picks which server to start: "loop" (default) is the single-threaded
-# event loop, and it exists in two forms across M4 — blocking handler for E4a,
-# a timer for E4b.
+# MODE selects which loop: 1 is E4a, where the handler still sleeps in the single
+# thread, and 2 is E4b, where the database call becomes a kqueue timer and the
+# thread goes and does something else.
 #
 # Read this table beside E1's and E3's. Same client, same ramp, same handler:
 # the only thing that differs is who waits during those 20 milliseconds, which
@@ -16,12 +16,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${1:-runs/e4}"
 DURATION="${DURATION:-3000}"
+MODE="${MODE:-1}"
 STEPS="${STEPS:-1 2 4 8 16 32}"
 
 mkdir -p "$OUT"
 rm -f "$OUT/summary.csv"
 
-build/dariyaraah --port 0 --event-loop 1 > "$OUT/server.log" 2>&1 &
+build/dariyaraah --port 0 --event-loop "$MODE" > "$OUT/server.log" 2>&1 &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null || true' EXIT
 
