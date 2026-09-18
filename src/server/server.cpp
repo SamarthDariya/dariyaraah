@@ -157,10 +157,9 @@ bool serve_one_turn(Parked& parked) {
         const optional<http::Request> request = http::parse_request_line(parked.received);
         const http::Response response =
             request ? handle(*request) : http::Response{400, "Bad Request", ""};
-        http::write_response(response, parked.out);
+        const bool sent = send_response(parked.client, response, parked.out);
         parked.received.erase(0, *length);
-        parked.client.write_all({parked.out.data(), parked.out.size()});
-        return request.has_value();
+        return sent && request.has_value();
     } catch (const dariyanaap::IoError&) {
         return false;
     }
@@ -174,10 +173,9 @@ bool answer_now(Parked& parked, size_t length) {
     const optional<http::Request> request = http::parse_request_line(parked.received);
     const http::Response response =
         request ? route(*request) : http::Response{400, "Bad Request", ""};
-    http::write_response(response, parked.out);
+    const bool sent = send_response(parked.client, response, parked.out);
     parked.received.erase(0, length);
-    parked.client.write_all({parked.out.data(), parked.out.size()});
-    return request.has_value();
+    return sent && request.has_value();
 }
 
 // Begin on whatever is buffered: park on a timer if answering costs the

@@ -1,6 +1,7 @@
 #include "server/connection.hpp"
 
 #include "core/errors.hpp"
+#include "fault/knobs.hpp"
 #include "http/request.hpp"
 #include "http/response.hpp"
 #include "server/handler.hpp"
@@ -8,6 +9,19 @@
 using namespace std;
 
 namespace dariyaraah {
+
+bool send_response(dariyanaap::Socket& client, const http::Response& response, string& out) {
+    // Latency first, then the drop decision, then the bytes — so an injected
+    // delay is paid whether or not the response is ultimately sent, which is
+    // what a slow backend actually does to a client.
+    dariyanaap::fault::before_response();
+    if (dariyanaap::fault::should_drop()) {
+        return false;
+    }
+    http::write_response(response, out);
+    client.write_all({out.data(), out.size()});
+    return true;
+}
 
 optional<size_t> read_request(dariyanaap::Socket& client, string& received,
                               vector<char>& scratch) {
@@ -46,11 +60,13 @@ void serve_connection(dariyanaap::Socket client) {
                 request ? handle(*request) : http::Response{400, "Bad Request", ""};
 
             // Serialise before erasing. Request borrows from `received`, and so
-            // could a Response — erasing first would leave write_response
+            // could a Response — erasing first would leave send_response
             // copying out of a buffer that had moved under it.
-            http::write_response(response, out);
+            const bool sent = send_response(client, response, out);
             received.erase(0, *length);
-            client.write_all({out.data(), out.size()});
+            if (!sent) {
+                return;  // dropped: see send_response on why this closes
+            }
 
             // A client whose request line we could not parse gets told so, and
             // then gets no further turns: the stream is of unknown shape, and

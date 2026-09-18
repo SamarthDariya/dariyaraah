@@ -136,7 +136,9 @@ add_library(dariyaraah_server
   src/server/connection.cpp
   src/server/event_loop.cpp
   src/server/server.cpp)
-target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::core)
+# fault since M6: unit 2 makes one of three dariyaraah backends ten times
+# slower, which decision 1 deferred to exactly this point.
+target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::fault)
 target_compile_options(dariyaraah_server PRIVATE ${DARIYARAAH_WARNINGS})
 
 

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/socket.hpp"
+#include "http/response.hpp"
 
 namespace dariyaraah {
 
@@ -47,5 +48,27 @@ inline constexpr std::size_t kReadChunkBytes = 8 * 1024;
 // entry point calls std::terminate, so one client hitting a read timeout would
 // take down a server that is otherwise serving 499 other connections perfectly.
 void serve_connection(dariyanaap::Socket client);
+
+// Send one response, after giving the fault library its say.
+//
+// Every model funnels through here, which is the point: unit 2 makes one of
+// three backends ten times slower, and a knob that only affected one threading
+// model would make that experiment a comparison of two different things.
+//
+// Returns false when the fault library says to drop the response, and the
+// caller then closes the connection. Dropping is the caller's decision to make
+// — unit 0 is explicit that the library will not make it — and closing is the
+// only coherent one here: these connections are keep-alive, so a response
+// silently withheld would leave the client's NEXT request answered by the reply
+// after it, which is the desynchronisation both sides of this series keep
+// refusing to guess through.
+//
+// KNOWN LIMIT: fault::before_response() blocks, so injected latency stalls the
+// event loop exactly the way E4a's handler did. Useful in the threaded models,
+// which is what unit 2 runs its backends as. Making it a timer would mean
+// teaching unit 0's fault library about kqueue, and that is a larger idea than
+// unit 2 needs.
+bool send_response(dariyanaap::Socket& client, const http::Response& response,
+                   std::string& out);
 
 }  // namespace dariyaraah
