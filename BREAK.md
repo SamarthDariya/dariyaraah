@@ -324,6 +324,8 @@ Numbers this unit establishes that later units quote rather than re-derive.
 | Run-to-run p99 noise at 500 conns | 29–63 ms, i.e. **up to 2×**. One sweep cannot resolve a tail effect smaller than that | E1 |
 | Open-loop `rig_lag` at low rates | **7.4 ms at 400 rps**, 2.7 ms at 800, ~0 past the knee. Subtract it before comparing modes | E2 |
 | p99/p50 under sustained overload | converges on **2**, both percentiles rising together | E2 |
+| A bounded pool's ceiling | **`workers / service_time`** exactly — 32 workers, 23.4 ms, 1,365 rps | E3 |
+| What a latency table hides | **starvation, entirely.** A refused connection has no duration, so p99 *improves* as refusals rise. Only per-kind error counts show it | E3 |
 
 **The standing question, answered:** p99 does **not** detach from p50 — not in closed-loop (1.04 →
 1.48 across 1 → 3,000 connections) and not in open-loop, where the ratio converges on 2 with *both*

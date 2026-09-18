@@ -75,14 +75,14 @@ see DESIGN.md.
 
 ## Status
 
-**M2 complete. It serves, it has been measured, and the standing question is settled.**
+**M3 complete. Two threading models measured; the pool's flatline found, and what it hides.**
 
 | Milestone | What lands | Status |
 |---|---|---|
 | M0 — Skeleton | CMake, doctest, sanitizers, the rig vendored, `check.sh` | ✅ |
 | M1 — The naive server | accept loop, thread per connection, minimal HTTP/1.1, `GET /` → 20ms → 200 | ✅ |
 | M2 — The ramp | predictions committed first, then E1 and E2 | ✅ |
-| M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | |
+| M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | ✅ |
 | M4 — Event loop | one thread, non-blocking sockets, `kqueue`, E4 | |
 | M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | |
 
@@ -157,6 +157,17 @@ curiosity. The only number produced so far is the end-to-end test's ceiling, whi
       have become the finding
 - [x] open-loop's `rig_lag` at low rates identified as the instrument's, not the server's — the
       reason unit 0's M6 was worth reopening a closed repo for
+
+### M3 — Bounded pool ✅
+- [x] `BlockingQueue` — bounded, two condition variables, closes by draining first
+- [x] queue tests assert a **sum**, not a count: a count passes while two workers serve one connection
+- [x] `--workers N` on one binary, 0 keeping M1's model, so both models serve identical work
+- [x] **the brief's flatline, found**: 1,365 rps from 32 connections on, and 500 buys nothing over 64
+- [x] Little's law to three significant figures — 32 workers ÷ 1,365 rps = 23.4 ms, which *is* E1's
+      measured `sleep_for(20ms)`
+- [x] **p99 improves as the service collapses** — 1,002 ms → 161 ms while refused connections go
+      95 → 448 → 968
+- [x] green under plain, ASan/UBSan and TSan with pool, queue, accept loop and rig all live
 
 ---
 
