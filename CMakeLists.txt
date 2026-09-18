@@ -129,6 +129,12 @@ add_library(dariyaraah_http src/http/request.cpp src/http/response.cpp)
 target_include_directories(dariyaraah_http PUBLIC src)
 target_compile_options(dariyaraah_http PRIVATE ${DARIYARAAH_WARNINGS})
 
+# The server layer, separate from the HTTP layer because the threading models of
+# M3 and M4 replace this and leave the parsing untouched.
+add_library(dariyaraah_server src/server/handler.cpp)
+target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::core)
+target_compile_options(dariyaraah_server PRIVATE ${DARIYARAAH_WARNINGS})
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -138,7 +144,7 @@ enable_testing()
 
 foreach(suite build_tests http_tests)
   add_executable(${suite} tests/${suite}.cpp)
-  target_link_libraries(${suite} PRIVATE dariyaraah_http dariyanaap::load doctest::doctest)
+  target_link_libraries(${suite} PRIVATE dariyaraah_server dariyanaap::load doctest::doctest)
   target_compile_options(${suite} PRIVATE ${DARIYARAAH_WARNINGS})
   add_test(NAME ${suite} COMMAND ${suite})
 endforeach()
