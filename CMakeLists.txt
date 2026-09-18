@@ -136,9 +136,9 @@ target_compile_options(dariyaraah_http PRIVATE ${DARIYARAAH_WARNINGS})
 
 enable_testing()
 
-foreach(suite build_tests)
+foreach(suite build_tests http_tests)
   add_executable(${suite} tests/${suite}.cpp)
-  target_link_libraries(${suite} PRIVATE dariyanaap::load doctest::doctest)
+  target_link_libraries(${suite} PRIVATE dariyaraah_http dariyanaap::load doctest::doctest)
   target_compile_options(${suite} PRIVATE ${DARIYARAAH_WARNINGS})
   add_test(NAME ${suite} COMMAND ${suite})
 endforeach()
