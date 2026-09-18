@@ -12,9 +12,9 @@ using namespace std;
 
 namespace dariyaraah {
 
-Server::Server(const dariyanaap::Endpoint& endpoint)
-    : listener_(endpoint.port() == 0 ? dariyanaap::Listener::bind_ephemeral(endpoint.host())
-                                     : dariyanaap::Listener::bind(endpoint)) {}
+Server::Server(const string& host, uint16_t port)
+    : listener_(port == 0 ? dariyanaap::Listener::bind_ephemeral(host)
+                          : dariyanaap::Listener::bind(dariyanaap::Endpoint(host, port))) {}
 
 void Server::run() {
     for (;;) {

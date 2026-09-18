@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 #include "core/endpoint.hpp"
 #include "core/listener.hpp"
@@ -25,7 +26,14 @@ inline constexpr dariyanaap::Millis kIdleTimeout{30'000};
 // finding that concurrency, and the number just before it, is M2's whole job.
 class Server {
 public:
-    explicit Server(const dariyanaap::Endpoint& endpoint);
+    // `port` of 0 asks the kernel to choose one, which port() then reports.
+    //
+    // Host and port rather than an Endpoint, because Endpoint cannot express
+    // this: it rejects port 0 in its constructor, and rightly — as a
+    // destination, port 0 means nothing. Only a bind address can mean "you
+    // pick". An earlier version of this took an Endpoint and branched on
+    // port() == 0, which was a branch nothing could reach.
+    Server(const std::string& host, std::uint16_t port);
 
     // The port actually bound, for when port 0 was asked for.
     std::uint16_t port() const { return listener_.port(); }
