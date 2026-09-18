@@ -81,17 +81,32 @@ about different experiments, and neither alone would have shown it.
 Four layers, and the seams between them are chosen so that M3 and M4 replace exactly one.
 
 ```
-apps/dariyaraah.cpp     flags, bind, run
-  └── Server            accept loop  ──►  thread per connection   ← M3 and M4 replace THIS
-        └── serve_connection          read, frame, parse, hand over, write
-              ├── http::  find_header_end · parse_request_line · write_response
-              └── handle(Request) -> Response        the 20ms, and no socket in sight
+apps/dariyaraah.cpp     flags, bind, --workers / --event-loop
+  └── Server            accept loop, and one of four models:
+        ├── thread per connection    serve_connection on its own thread      (M1)
+        ├── pool + BlockingQueue     N workers pull a connection and keep it (M3)
+        ├── event loop, blocking     one thread, kqueue, handle() sleeps     (M4, E4a)
+        └── event loop + timer       one thread, kqueue, the wait IS an event (M4, E4b)
+              └── all four:
+                    ├── http::  find_header_end · parse_request_line · write_response
+                    └── route(Request) -> Response   +   needs_database(Response)
 ```
 
-**`handle` is the fixed point.** It takes a `Request` and returns a `Response` and cannot reach a
-socket, which is what lets three threading models run *the same work*. A handler reachable only
-through a connection object would have to be reimplemented per model, and E1–E4 would then be
-comparing three different programs while calling the difference a threading result.
+**`route` is the fixed point, and the wait is the variable.** `route` takes a `Request`, returns a
+`Response`, and cannot reach a socket or a clock. `needs_database` says whether producing that answer
+costs the 20 ms. Every model then waits in its own way — a sleeping thread, a pool worker, a kqueue
+timer — and *nothing else differs between them*. That is what makes E1 through E4 a comparison of
+threading models rather than of four programs with threading labels attached.
+
+M1 shipped this as a single `handle()` with the sleep in the middle, which was the same idea stated
+implicitly. M4 had to split it, because a single thread cannot sleep, and the split says out loud
+what `handle()` only implied.
+
+**The `Phase` enum is the event loop's true cost.** M1 and M3 keep a connection's buffers and its
+progress on a thread's stack, where the connection's lifetime and the stack frame's are the same
+thing. One thread serving everything has to be able to put a connection down mid-request and pick it
+up again, so that state moves into a map keyed by descriptor and its progress becomes an explicit
+enum. The event loop's benefits arrive at E4b; this cost arrives at E4a, before any of them.
 
 **Everything borrows.** `Request`'s fields are `string_view`s into the connection's read buffer;
 `Response`'s body is a `string_view`; `write_response` serialises into a caller-owned `string`. Three
@@ -132,9 +147,17 @@ From [dariyanaap's BREAK.md](../dariyanaap/BREAK.md):
 
 Recorded rather than resolved, to be settled by the milestone that needs them:
 
-- **Non-blocking sockets for M4.** `dariyanaap::Socket` sets `O_NONBLOCK` internally for its connect
-  timeout but does not expose it. The event loop needs it. Reach through `Socket::fd()` from this
-  repo, or add a method to unit 0? Leaning: reach through `fd()`, and leave unit 0 alone unless a
-  second unit wants the same thing.
-- **Whether the pool and the event loop share an HTTP parser.** They should, but only M3 will show
-  whether the parser's interface survives not owning its own thread.
+- ~~**Non-blocking sockets for M4.**~~ **Settled: not needed, and unit 0 was left alone.** The loop
+  is level-triggered and uses kqueue purely for readiness, so `read_some` never blocks when called
+  and a 50-byte response never fills a send buffer. `O_NONBLOCK` would have bought partial-write
+  bookkeeping and nothing else. **The known limit this accepts:** one slow client, reading its
+  response a byte at a time, would stall the entire loop inside `write_all`. A production server must
+  have non-blocking writes and an outbound queue per connection; a repo measuring threading models
+  against a rig on loopback does not, and pretending otherwise would have cost a day and taught
+  nothing this unit is about.
+- ~~**Whether the pool and the event loop share an HTTP parser.**~~ **Settled: they do, unchanged.**
+  `find_header_end` and `parse_request_line` were written for a thread that owned its connection and
+  needed no modification for a pool or for a loop that owns all of them. The reason is that neither
+  function ever owned anything: both take a `string_view` and return an offset or a borrowed view, so
+  where the bytes live and who is waiting for more of them was never their business. Borrowing was
+  chosen at M1 to keep the allocator off the measured path; it paid a second time here.
