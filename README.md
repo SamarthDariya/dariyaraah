@@ -75,7 +75,7 @@ see DESIGN.md.
 
 ## Status
 
-**Complete — M0 through M5, E1 through E4b.**
+**Complete — M0 through M5, E1 through E4b.** M6 adds the fault knobs unit 2 needs.
 
 | Milestone | What lands | Status |
 |---|---|---|
@@ -85,6 +85,7 @@ see DESIGN.md.
 | M3 — Bounded pool | a fixed pool behind a request queue, same ramps, E3 | ✅ |
 | M4 — Event loop | one thread, `kqueue`, E4a blocking and E4b with the wait as a timer | ✅ |
 | M5 — Write-up | Little's law derived, DESIGN/BREAK/README finished | ✅ |
+| M6 — Fault knobs | `dariyanaap::fault` on the response path, for unit 2 | ✅ |
 
 ---
 
@@ -110,6 +111,20 @@ numbers every monitoring system already collects.
 ```sh
 ./build/dariyaraah --port 0          # kernel-chosen port, printed on line one
 curl -D- http://127.0.0.1:<port>/    # 200 OK, 20ms later
+```
+
+**Two delays live in this server, and they are different things.** The 20ms
+database call is a `sleep_for` inside the handler, and it is the subject of this
+unit. Anything set through `dariyanaap::fault` is *extra*, applied just before
+the response goes out, and exists so unit 2 can make one backend of three ten
+times slower than its siblings:
+
+```sh
+DARIYANAAP_FAULT_LATENCY_MS=234 ./build/dariyaraah --port 0 --fault-port 7788
+# 261ms per request instead of 21ms
+
+printf 'latency 0 0\n' | nc 127.0.0.1 7788    # healed, mid-run, no restart
+printf 'hang 1\n'      | nc 127.0.0.1 7788    # stops answering entirely
 ```
 
 ```
@@ -185,6 +200,23 @@ curiosity. The only number produced so far is the end-to-end test's ceiling, whi
 - [x] **p99 improves as the service collapses** — 1,002 ms → 161 ms while refused connections go
       95 → 448 → 968
 - [x] green under plain, ASan/UBSan and TSan with pool, queue, accept loop and rig all live
+
+### M6 — Fault knobs ✅
+> Added after the unit was closed, by unit 2 (`dariyabaant`), which needs one of
+> three identical backends to be ten times slower than the others. Decision 1
+> deferred this here on purpose rather than building it at M1.
+
+- [x] `dariyanaap::fault` linked, and every threading model funnels through one
+      `send_response` — a knob affecting only one model would make unit 2 a
+      comparison of two different programs
+- [x] `--fault-port` serves the control socket, so a backend can be made to hang
+      **mid-run**, which is unit 2's actual experiment
+- [x] a dropped response closes the connection: with keep-alive, silently
+      withholding one leaves the client's next request answered by the reply
+      after it
+- [x] known limit stated in the header — injected latency blocks the event loop
+      exactly as E4a's handler did, which is why unit 2 runs its backends
+      threaded
 
 ### M5 — Write-up ✅
 - [x] Little's law checked against all four models: **within 4% on seven rows**, and the eighth row's
