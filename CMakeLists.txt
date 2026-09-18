@@ -70,6 +70,26 @@ endif()
 
 
 # ---------------------------------------------------------------------------
+# The rig
+# ---------------------------------------------------------------------------
+#
+# dariyanaap, unit 0, vendored as a submodule. Added AFTER the sanitizer flags
+# on purpose: add_compile_options is directory-scoped and inherited by
+# subdirectories, so the rig gets built under ASan/TSan too. A race inside the
+# thing doing the measuring is worth catching in exactly the same run.
+#
+# It brings its own guard against building tests, CLIs or forcing -Werror on us
+# when it is not the top-level project, which its vendor-smoke-test.sh asserts.
+# This repo is the first real consumer of that claim.
+#
+# dariyanaap::load is linked rather than ::core, and core arrives with it: the
+# driver is what an end-to-end test needs to put load on this server from
+# inside the test binary. dariyanaap::fault stays out until unit 2 needs it
+# (decision 1).
+add_subdirectory(vendor/dariyanaap)
+
+
+# ---------------------------------------------------------------------------
 # doctest
 # ---------------------------------------------------------------------------
 #
@@ -106,7 +126,7 @@ enable_testing()
 
 foreach(suite build_tests)
   add_executable(${suite} tests/${suite}.cpp)
-  target_link_libraries(${suite} PRIVATE doctest::doctest)
+  target_link_libraries(${suite} PRIVATE dariyanaap::load doctest::doctest)
   target_compile_options(${suite} PRIVATE ${DARIYARAAH_WARNINGS})
   add_test(NAME ${suite} COMMAND ${suite})
 endforeach()
