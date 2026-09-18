@@ -134,6 +134,7 @@ target_compile_options(dariyaraah_http PRIVATE ${DARIYARAAH_WARNINGS})
 add_library(dariyaraah_server
   src/server/handler.cpp
   src/server/connection.cpp
+  src/server/event_loop.cpp
   src/server/server.cpp)
 target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::core)
 target_compile_options(dariyaraah_server PRIVATE ${DARIYARAAH_WARNINGS})
