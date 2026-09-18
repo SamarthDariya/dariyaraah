@@ -1,27 +1,36 @@
 #include "server/server.hpp"
 
 #include <optional>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "core/address.hpp"
 #include "core/errors.hpp"
 #include "core/socket.hpp"
+#include "http/request.hpp"
+#include "http/response.hpp"
 #include "server/connection.hpp"
+#include "server/event_loop.hpp"
+#include "server/handler.hpp"
 #include "server/queue.hpp"
 
 using namespace std;
 
 namespace dariyaraah {
 
-Server::Server(const string& host, uint16_t port, size_t workers)
+Server::Server(const string& host, uint16_t port, size_t workers, bool event_loop)
     : workers_(workers),
+      event_loop_(event_loop),
       listener_(port == 0 ? dariyanaap::Listener::bind_ephemeral(host)
                           : dariyanaap::Listener::bind(dariyanaap::Endpoint(host, port))) {}
 
 void Server::run() {
-    if (workers_ == 0) {
+    if (event_loop_) {
+        run_event_loop();
+    } else if (workers_ == 0) {
         run_thread_per_connection();
     } else {
         run_pool();
@@ -72,6 +81,81 @@ void Server::run_pool() {
     waiting.close();
     for (thread& worker : pool) {
         worker.join();
+    }
+}
+
+namespace {
+
+// Everything one connection needs, for a loop that owns them all at once.
+// M1 and M3 keep this on a thread's stack; here it has to be somewhere the
+// single thread can put it down and pick up again.
+struct Parked {
+    dariyanaap::Socket client;
+    string received;
+    string out;
+    vector<char> scratch = vector<char>(kReadChunkBytes);
+};
+
+// One turn: read what is there, and serve a request if a whole one has arrived.
+// Returns false when this connection is finished.
+//
+// The handler BLOCKS for 20ms inside here, which is M4's first experiment. One
+// thread plus a blocking handler means one request at a time for the whole
+// server, and the point is to measure how bad that is rather than to assume it.
+bool serve_one_turn(Parked& parked) {
+    try {
+        const size_t got = parked.client.read_some(
+            {parked.scratch.data(), parked.scratch.size()});
+        if (got == 0) {
+            return false;  // clean hang-up
+        }
+        parked.received.append(parked.scratch.data(), got);
+
+        const optional<size_t> length = http::find_header_end(parked.received);
+        if (!length) {
+            return parked.received.size() <= kMaxHeaderBytes;
+        }
+
+        const optional<http::Request> request = http::parse_request_line(parked.received);
+        const http::Response response =
+            request ? handle(*request) : http::Response{400, "Bad Request", ""};
+        http::write_response(response, parked.out);
+        parked.received.erase(0, *length);
+        parked.client.write_all({parked.out.data(), parked.out.size()});
+        return request.has_value();
+    } catch (const dariyanaap::IoError&) {
+        return false;
+    }
+}
+
+}  // namespace
+
+void Server::run_event_loop() {
+    EventLoop loop;
+    loop.watch_read(listener_.fd());
+    unordered_map<int, Parked> parked;
+
+    while (!stopping_.load(memory_order_relaxed)) {
+        for (const Event& event : loop.wait(kPollInterval)) {
+            const int fd = static_cast<int>(event.ident);
+            if (fd == listener_.fd()) {
+                dariyanaap::Socket client = listener_.accept();
+                if (stopping_.load(memory_order_relaxed)) {
+                    return;
+                }
+                client.set_timeouts(kIdleTimeout, kIdleTimeout);
+                const int client_fd = client.fd();
+                loop.watch_read(client_fd);
+                parked.emplace(client_fd, Parked{std::move(client), {}, {}, {}});
+                continue;
+            }
+
+            const auto found = parked.find(fd);
+            if (found != parked.end() && !serve_one_turn(found->second)) {
+                loop.unwatch_read(fd);
+                parked.erase(found);  // the Socket's destructor closes it
+            }
+        }
     }
 }
 

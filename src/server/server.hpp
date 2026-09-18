@@ -19,6 +19,11 @@ namespace dariyaraah {
 // a leak, it is a denial of service with one connection.
 inline constexpr dariyanaap::Millis kIdleTimeout{30'000};
 
+// How long the event loop waits before looking at its stop flag again. Nothing
+// is polled on this interval — the loop wakes on events — so it costs one
+// wake-up every tenth of a second on an idle server and bounds shutdown.
+inline constexpr dariyanaap::Millis kPollInterval{100};
+
 // A thread per connection, which is the design under test rather than a
 // recommendation.
 //
@@ -37,7 +42,12 @@ public:
     // `workers` of 0 is M1's model: a thread per connection, unbounded.
     // Anything else is M3's: that many threads, and a bounded queue of accepted
     // connections between them and the accept loop.
-    Server(const std::string& host, std::uint16_t port, std::size_t workers = 0);
+    //
+    // `event_loop` overrides both with M4's: one thread, kqueue, and no
+    // concurrency at all while the handler is blocking. That last clause is the
+    // experiment, not a caveat.
+    Server(const std::string& host, std::uint16_t port, std::size_t workers = 0,
+           bool event_loop = false);
 
     // The port actually bound, for when port 0 was asked for.
     std::uint16_t port() const { return listener_.port(); }
@@ -67,8 +77,10 @@ private:
 
     void run_thread_per_connection();
     void run_pool();
+    void run_event_loop();
 
     std::size_t workers_;
+    bool event_loop_;
     std::atomic<bool> stopping_{false};
     dariyanaap::Listener listener_;
 };
