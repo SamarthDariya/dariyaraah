@@ -139,6 +139,13 @@ target_link_libraries(dariyaraah_server PUBLIC dariyaraah_http dariyanaap::core)
 target_compile_options(dariyaraah_server PRIVATE ${DARIYARAAH_WARNINGS})
 
 
+# The server itself. One binary, one endpoint; M3 and M4 add flags to it rather
+# than executables beside it, so the three threading models stay one program.
+add_executable(dariyaraah apps/dariyaraah.cpp)
+target_link_libraries(dariyaraah PRIVATE dariyaraah_server)
+target_compile_options(dariyaraah PRIVATE ${DARIYARAAH_WARNINGS})
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
