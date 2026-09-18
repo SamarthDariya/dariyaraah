@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -33,7 +34,10 @@ public:
     // destination, port 0 means nothing. Only a bind address can mean "you
     // pick". An earlier version of this took an Endpoint and branched on
     // port() == 0, which was a branch nothing could reach.
-    Server(const std::string& host, std::uint16_t port);
+    // `workers` of 0 is M1's model: a thread per connection, unbounded.
+    // Anything else is M3's: that many threads, and a bounded queue of accepted
+    // connections between them and the accept loop.
+    Server(const std::string& host, std::uint16_t port, std::size_t workers = 0);
 
     // The port actually bound, for when port 0 was asked for.
     std::uint16_t port() const { return listener_.port(); }
@@ -53,6 +57,18 @@ public:
     void stop();
 
 private:
+    // A worker holds a connection for that connection's whole life, so this
+    // queue holds connections waiting for a worker to become free — which, with
+    // keep-alive, means waiting for another connection to hang up. The capacity
+    // is small on purpose: filling it blocks the accept loop, the kernel
+    // backlog fills behind that, and the kernel then refuses connects. A client
+    // told "no" immediately is better served than one accepted and ignored.
+    static constexpr std::size_t kQueuePerWorker = 2;
+
+    void run_thread_per_connection();
+    void run_pool();
+
+    std::size_t workers_;
     std::atomic<bool> stopping_{false};
     dariyanaap::Listener listener_;
 };
