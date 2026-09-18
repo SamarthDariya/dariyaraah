@@ -322,8 +322,45 @@ server, p50 ≈ N × 23.4 ms. At 32 connections that is 750 ms; at 500 it exceed
 timeout, so most requests should fail rather than return, and throughput should *fall* as the run
 spends itself on connections that time out and reconnect.
 
-- **Measured:**
-- **Wrong about:**
+- **Measured:** `./scripts/e4-loop.sh`, 3s after 500ms warm-up per step.
+
+  | conns | req/s | p50 | p90 | p99 | errors |
+  |---|---|---|---|---|---|
+  | 1 | 42 | 24.38 ms | 25.43 | 25.56 | — |
+  | 2 | 42 | 47.71 | 50.07 | 50.33 | — |
+  | 4 | 42 | 72.88 | 143.66 | 146.80 | — |
+  | 8 | 42 | 167.77 | 329.25 | 339.74 | — |
+  | 16 | **45** | 214.96 | 1,002.44 | 1,002.44 | 17 timeout |
+  | 32 | **61** | 220.20 | 1,002.44 | 1,002.44 | 69 timeout |
+
+  **42 rps, flat, from one connection to eight.** Exactly `1 / service_time`, and connections buy
+  literally nothing — the 1-connection and 8-connection rows serve the same 127 requests in three
+  seconds. Against M1 at 32 connections (1,291 rps) and M3 (1,333 rps), this is **21× worse**, on the
+  same machine, serving the same handler.
+
+  p50 climbs 24 → 48 → 73 → 168 ms as clients queue behind the one thread. Little's law running
+  backwards: latency is concurrency ÷ throughput, throughput is fixed at 42, so every connection added
+  is 24 ms on everyone's latency.
+
+- **Wrong about:** the direction of the throughput number past the timeout threshold.
+
+  The prediction said throughput should **fall** at high concurrency as the run spent itself on
+  connections that timed out and reconnected. It **rose** — 42 → 45 → 61 — and the reason is the
+  third time in this repo that a prediction has been bent by a design decision inside the instrument.
+  `exchange.cpp` records a timed-out request in the histogram at its true elapsed time, so a timeout
+  is a sample, and `per_second()` counts samples. At 32 connections, 69 of the 183 attempts were
+  timeouts: the honest successful rate is ~38 rps, and the reported 61 is a third failure by volume.
+
+  So **the throughput column counts failures as work**, which is E3's finding arriving from the
+  opposite direction. There, the latency table improved as the service collapsed because refused
+  connections have no duration. Here, the throughput table improves as the service collapses because
+  timed-out connections do. Both are true statements about a distribution that stopped describing the
+  thing anyone cared about, and in both cases the only honest reading came from the per-kind error
+  counters sitting next to it.
+
+  The p50 figure at 32 connections was predicted at ~750 ms and measured at 220 ms, for the same
+  reason: everything slower than 1,000 ms left the distribution as a timeout, so the surviving median
+  describes the requests lucky enough to be served.
 
 ## E4b — Event loop, the database call as a timer (M4)
 
