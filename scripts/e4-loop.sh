@@ -14,6 +14,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/rig.sh
+source scripts/rig.sh
+ensure_rig
 OUT="${1:-runs/e4}"
 DURATION="${DURATION:-3000}"
 MODE="${MODE:-1}"
@@ -33,7 +36,7 @@ echo "closed-loop, ${DURATION}ms measured after 500ms warm-up per step"
 echo
 
 for conns in $STEPS; do
-    vendor/dariyanaap/build/dariyanaap --target "127.0.0.1:$PORT" --protocol http --path / \
+    "$RIG" --target "127.0.0.1:$PORT" --protocol http --path / \
         --connections "$conns" --duration "$DURATION" --warmup 500 --csv-dir "$OUT" || true
     echo
 done

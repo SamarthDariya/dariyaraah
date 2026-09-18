@@ -73,6 +73,38 @@ see DESIGN.md.
 
 ---
 
+## Reproducing the measurements
+
+Every table in [BREAK.md](BREAK.md) comes from one of these. They start a server on an
+ephemeral port, drive it with the vendored rig, and write CSV to `runs/`.
+
+```sh
+./scripts/e1-ramp.sh     # E1  closed-loop, connections 1 -> 500
+./scripts/e2-rate.sh     # E2  open-loop, rate swept through the knee
+./scripts/e3-pool.sh     # E3  32 workers fixed, connections ramped past them
+./scripts/e4-loop.sh     # E4a event loop, blocking handler
+MODE=2 ./scripts/e4-loop.sh   # E4b event loop, the wait as a kqueue timer
+```
+
+Each takes environment overrides rather than flags, because they get re-run with a single step over
+and over — which is how E1's 1-in-7 outlier was caught:
+
+```sh
+STEPS="500" DURATION=3000 ./scripts/e1-ramp.sh     # one step, repeatedly
+WORKERS=8 ./scripts/e3-pool.sh                     # a different pool size
+RATES="400 800 1200" ./scripts/e2-rate.sh
+```
+
+They build the rig's CLI themselves on first run. It is not built by `cmake --build build`: unit 0
+suppresses its own executables when it is vendored, which is exactly what it should do and means its
+CLI needs building once, separately. `scripts/rig.sh` does that rather than leaving a fresh clone to
+discover it.
+
+**Read the error counters before the throughput column.** E3 and E4a are both runs where the summary
+numbers improve while the service collapses, and the per-kind counts are the only place that shows.
+
+---
+
 ## Status
 
 **Complete — M0 through M5, E1 through E4b.** M6 adds the fault knobs unit 2 needs.

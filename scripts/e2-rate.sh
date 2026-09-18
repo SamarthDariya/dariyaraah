@@ -18,6 +18,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/rig.sh
+source scripts/rig.sh
+ensure_rig
 OUT="${1:-runs/e2}"
 CONNECTIONS="${CONNECTIONS:-32}"
 DURATION="${DURATION:-3000}"
@@ -37,7 +40,7 @@ echo
 
 for rate in $RATES; do
     echo "--- offered $rate rps ---"
-    vendor/dariyanaap/build/dariyanaap --target "127.0.0.1:$PORT" --protocol http --path / \
+    "$RIG" --target "127.0.0.1:$PORT" --protocol http --path / \
         --connections "$CONNECTIONS" --rate "$rate" --duration "$DURATION" --warmup 500 \
         --csv-dir "$OUT" || true
     echo
