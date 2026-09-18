@@ -253,8 +253,49 @@ is a true statement about a shrinking subset of the traffic. The error counters 
 the failure appears, which is unit 0's decision 6 — errors counted by kind, never folded into one
 rate — earning its keep three repos later.
 
-- **Measured:**
-- **Wrong about:**
+- **Measured:** `./scripts/e3-pool.sh`, 32 workers held fixed, 3s after 500ms warm-up per step.
+
+  | conns | req/s | p50 | p90 | p99 | errors |
+  |---|---|---|---|---|---|
+  | 1 | 42 | 24.64 ms | 25.30 | 25.56 | — |
+  | 8 | 336 | 24.25 | 25.30 | 25.56 | — |
+  | 16 | 656 | 24.64 | 25.56 | 25.95 | — |
+  | 32 | **1,333** | 24.38 | 25.43 | 25.82 | — |
+  | 64 | **1,365** | 24.51 | 25.43 | **1,002.44** | 64 timeout |
+  | 128 | **1,367** | 24.77 | 26.21 | **1,002.44** | 95 connect · 97 timeout |
+  | 256 | **1,365** | 24.90 | 26.35 | 133.69 | **448 connect** |
+  | 500 | **1,441** | 24.90 | 35.65 | 161.48 | **968 connect** |
+
+  **The flatline, exactly where predicted.** 1,365 rps from 32 connections onward, and 500
+  connections buys nothing over 64. Little's law again, and this time almost embarrassingly clean:
+  32 workers / 1,365 rps = 23.4 ms, which is E1's measured `sleep_for(20ms)` figure to three
+  significant figures. The pool's service time is *pure timer*.
+
+- **Wrong about:** the throughput column, the p50 column and the conclusion held. The p99 column was
+  wrong, and the way it was wrong is better than the prediction.
+
+  **p50 stays flat at ~24.9 ms to 500 connections — better than M1's 25.69 ms at the same step, while
+  serving 1,441 rps instead of 19,525.** Predicted, and it held.
+
+  **p99 does not stay flat: it hits 1,002.44 ms at 64 and 128 connections.** The prediction assumed
+  starved connections never reach the histogram. They do — as timeouts. Unit 0's `exchange.cpp`
+  records a timed-out request at its *actual* elapsed time rather than dropping it, deliberately, "so
+  it never under-reports", and 1,002.44 ms is the 1,000 ms read timeout showing through. The claim
+  was wrong because it forgot a design decision inside the instrument, which is the same class of
+  mistake as E1's 20 ms constant.
+
+  **And then p99 gets BETTER as the service gets worse.** At 256 and 500 connections it falls to
+  133.69 and 161.48 ms while refused connections climb 95 → 448 → 968. The failure mode changed: a
+  connection *accepted and starved* eventually times out, and a timeout is recorded; a connection
+  *refused* has no duration at all, is counted by kind, and never enters the histogram. **The more
+  severe failure is the one the latency table cannot see.**
+
+  So the conclusion is stronger than the prediction, not weaker. Latency percentiles cannot see
+  starvation, and they *improve* as it deepens. A dashboard showing p50 24.9 ms with p99 falling from
+  1,002 ms to 161 ms reads as a service recovering. It was refusing two thirds of its clients. The
+  only honest signal is the error counters split by kind — unit 0's decision 6, "errors are counted
+  by kind, never as one rate", earning its keep three repos later for a reason nobody had in mind
+  when it was written.
 
 ## E4 — Event loop (M4)
 
